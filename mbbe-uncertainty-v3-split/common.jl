@@ -302,6 +302,12 @@ function virtual_be_sim_batched(param_samples, method_name;
         cell_count += 1
 
         for b in 1:n_batches
+            # Seed each batch independently so macro-replications are truly
+            # independent.  The seed is a deterministic function of the design
+            # cell and batch id, which also makes results reproducible.
+            batch_seed = abs(hash((method_name, tr, n_arm, b)) % typemax(Int32))
+            Random.seed!(batch_seed)
+
             n_pass  = 0
             n_error = 0
 
