@@ -1,0 +1,5 @@
+# Editor state
+.vscode/
+
+# Julia
+*.cov
