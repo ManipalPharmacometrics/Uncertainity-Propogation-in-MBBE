@@ -1,0 +1,296 @@
+---
+title: "Uncertainity propogation in MBBE"
+format: html
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+# Load Libraries
+```{julia}
+using Pumas
+using Random
+using Distributions
+using LinearAlgebra
+using Statistics
+using Bioequivalance
+```
+
+# Set Random seed
+
+```{julia}
+Random.seed!(123)
+```
+
+# Model
+```{julia}
+pkmodel = @model begin
+  @param begin
+    tvcl ∈ RealDomain(lower=0)
+    tvv  ∈ RealDomain(lower=0)
+    tvka ∈ RealDomain(lower=0)
+    tvbio ∈ RealDomain(lower=0)
+    Ω ∈ PDiagDomain(3)
+    σ ∈ RealDomain(lower=0)
+  end
+
+  @random begin
+    η ~ MvNormal(Ω)
+  end
+
+  @covariates TRT
+
+  @pre begin
+    CL = tvcl * exp(η[1])
+    V  = tvv  * exp(η[2])
+    Ka = tvka * exp(η[3]) * (TRT == "T" ? tvbio : 1.0)
+  end
+
+  @dynamics begin
+    Depot'   = -Ka*Depot
+    Central' =  Ka*Depot - (CL/V)*Central
+  end
+
+  @derived begin
+    cp = @. Central/V
+    dv ~ @. Normal(cp, σ)
+  end
+end
+```
+ 
+
+ # Parameter Values
+
+```{julia}
+
+θ_true = (
+    tvcl = 5.0,
+    tvv  = 50.0,
+    tvka = 1.2,
+    tvbio = 1.0, 
+    Ω    = Diagonal([0.09, 0.09, 0.09]),   # 30% CV IIV
+    σ    = 0.2                            # GMR control
+)
+
+```
+
+# Simulate TRUE BE DATASET
+```{julia}
+
+function simulate_trial(n_per_arm; tvbio=1.0)
+
+    subjects = Subject[]
+
+    for trt in ["R","T"]
+        for i in 1:n_per_arm
+            push!(subjects,
+                Subject(
+                    id = length(subjects)+1,
+                    events = DosageRegimen(100, time=0),
+                    covariates = (TRT = trt,)
+                )
+            )
+        end
+    end
+
+    pop = Population(subjects)
+
+    sim = simobs(pkmodel, pop, 
+        merge(θ_true, (tvbio=tvbio,));
+        obstimes = 0:1:72
+    )
+
+    return sim
+end
+```
+
+# FIT MODEL TO ONE TRIAL
+
+```{julia}
+
+sim_data = simulate_trial(30)
+simdf = DataFrame(sim_data)
+
+init = (
+    tvcl = 4.5,
+    tvv  = 45.0,
+    tvka = 1.0,
+    tvbio  = 1.0,
+    Ω    = Diagonal([0.1,0.1,0.1]),
+    σ    = 0.3
+)
+
+sim_pop = read_pumas(DataFrame(sim_data),
+                      id = :id,
+                      time = :time,
+                      observations = [:dv],
+                      amt = :amt,
+                      evid = :evid,
+                      covariates = [:TRT],
+                      cmt = :cmt)
+
+fit_res = fit(pkmodel, sim_pop, init, Pumas.FOCE())
+```
+
+
+
+# UNCERTAINTY PROPAGATION METHODS
+
+
+## VCOV Method
+
+```{julia}
+# function sample_vcov(θ̂, vcov_mat, n_samples)
+#     return rand(MvNormal(θ̂, vcov_mat), n_samples)
+# end
+
+vcovbio = sqrt(vcov(fit_res)[4,4])
+```
+
+
+## Bootstrap 
+
+```{julia}
+
+bootstrap_settings = Bootstrap(samples=200, stratify_by=nothing, ensemblealg=EnsembleThreads())
+
+#Perform inference using the bootstrap method
+bootres = infer(fit_res, bootstrap_settings; level=0.95)
+
+
+boot_params = coef(bootres)
+
+#boot_mat = hcat(boot_params...)
+
+```
+
+# SIR
+```{julia}
+
+sir_settings = SIR(samples=200, resamples = 200) #stratify_by=nothing, ensemblealg=EnsembleThreads())
+
+#Perform inference using the bootstrap method
+sir_result = infer(fit_res, sir_settings; level=0.95)
+
+sir_params = coef(sir_result)
+
+```
+
+# BE Decision
+
+```{julia}
+
+simdf.route .= "ev"
+
+ncapop = read_nca(simdf,
+                id=:id,
+                time=:time,
+                amt = :amt,
+                observations = :dv,
+                route = :route,
+                group = [:TRT] #,
+
+)
+
+nca_res = run_nca(ncapop)
+
+nca_table1 = nca_res.reportdf
+
+nca_table1.period .= 1
+
+nca_table1.sequence .= nca_table1.TRT
+
+
+beres = pumas_be(nca_table1)
+
+```
+
+# Virtual BE Simulation Loop
+```{julia}
+function virtual_be(param_samples, Ω, σ;
+                    n_trials=1000,
+                    n_per_arm=30,
+                    gmr=1.0)
+
+    decisions = Bool[]
+
+    for i in 1:n_trials
+
+        θ = param_samples[rand(1:size(param_samples,1)), :]
+
+        sim = simulate_trial(n_per_arm, θ, Ω, σ; gmr=gmr)
+
+        # compute AUC per subject
+        aucs = compute_auc(sim)
+
+        logratios = log.(aucs[TRT .==2]) .-
+                    log.(aucs[TRT .==1])
+
+        push!(decisions, tost_decision(logratios))
+    end
+
+    return mean(decisions)
+end
+
+```
+
+
+# Power
+```{julia}
+
+power = virtual_be(samples, Ω, σ; gmr=1.0)
+
+power = virtual_be(10, 30, 10; gmr=1.0)
+```
+
+
+# Type 1 error
+```{julia}
+
+type1 = virtual_be(samples, Ω, σ; gmr=0.75)
+```
+
+# Summary
+```{julia}
+power_vcov = virtual_be(vcov_samples, Ω, σ)
+power_boot = virtual_be(boot_mat, Ω, σ)
+power_sir  = virtual_be(sir_mat, Ω, σ)
+power_fixed = virtual_be([θ̂'], Ω, σ)
+
+```
+
+
+```{julia}
+
+
+```
+
+
+```{julia}
+
+
+```
+
+
+```{julia}
+
+
+```
+
+```{julia}
+
+
+```
+
+
+
+```{julia}
+
+
+```
+
+```{julia}
+
+
+```

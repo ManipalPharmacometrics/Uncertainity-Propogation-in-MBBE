@@ -1,0 +1,1571 @@
+---
+title: "MBBE Uncertainty: Power & Type I Error with Confidence Intervals (v3)"
+subtitle: "200 × 200 Batch Design for Operating Characteristics — Parallel Design — Absolute & Relative to Fixed"
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 3 
+    toc-location: left
+    number-sections: true
+    code-fold: true
+    code-summary: "Show code"
+    code-tools: true
+    code-overflow: wrap
+    fig-align: center
+    self-contained: true
+    smooth-scroll: true
+    fontsize: "1rem"
+    mainfont: "system-ui, -apple-system, sans-serif"
+execute:
+  echo: true
+  warning: false
+  message: false
+engine: julia
+---
+
+# Overview
+
+This document extends **v2** by running **200 macro-replications** (batches), each
+containing **200 virtual BE trials**, for every combination of sample size, T/R ratio,
+and uncertainty method. This yields **200 independent estimates** of power (or type I
+error) per cell, from which we compute:
+
+- **Point estimate**: mean pass rate across the 200 batches
+- **95% CI for the true rate**: mean ± 1.96 × SE (SE = sd / √200)
+- **Percentile interval**: 2.5th – 97.5th percentile of the 200 batch estimates
+
+All results are presented in two forms:
+
+- **Absolute**: raw power / type I error rate with 95% CI for each method
+- **Relative to Fixed**: each uncertainty method (VCOV, Bootstrap, SIR) benchmarked
+  against the Fixed (plug-in) method, reported as both an absolute difference
+  (percentage points, pp) with 95% CI and a multiplicative ratio with 95% CI
+
+::: {.callout-warning}
+## Computational Cost
+With 200 batches × 200 trials × 7 sample sizes × 5 T/R ratios × 4 methods =
+**5.6 million** individual trial simulations, this document takes significant time
+to render. Reduce `N_BATCHES` or `N_SIMS_PER_BATCH` in Section 11 for faster testing.
+:::
+
+# Load Libraries
+```{julia}
+#| output: false
+using Pumas
+using Random
+using Distributions
+using LinearAlgebra
+using Statistics
+using DataFrames
+using Bioequivalence
+using CairoMakie
+using Makie
+using Logging
+```
+
+# Set Random Seed
+```{julia}
+#| output: false
+Random.seed!(142)
+```
+
+# PK Model
+
+`tvbio` controls relative bioavailability of Test vs Reference via `@dosecontrol`,
+so AUC_T/AUC_R = tvbio exactly.
+
+```{julia}
+#| output: false
+pkmodel = @model begin
+    @param begin
+        tvcl  ∈ RealDomain(lower=0)
+        tvv   ∈ RealDomain(lower=0)
+        tvka  ∈ RealDomain(lower=0)
+        tvbio ∈ RealDomain(lower=0)
+        Ω     ∈ PDiagDomain(3)
+        σ     ∈ RealDomain(lower=0)
+    end
+
+    @random begin
+        η ~ MvNormal(Ω)
+    end
+
+    @covariates TRT
+
+    @pre begin
+        CL  = tvcl * exp(η[1])
+        V   = tvv  * exp(η[2])
+        Ka  = tvka * exp(η[3])
+    end
+
+    @dosecontrol begin
+        bioav = (Depot = TRT == "T" ? tvbio : 1.0,)
+    end
+
+    @dynamics begin
+        Depot'   = -Ka * Depot
+        Central' =  Ka * Depot - (CL / V) * Central
+    end
+
+    @derived begin
+        cp = @. Central / V
+        dv ~ @. Normal(cp, σ)
+    end
+end
+```
+
+# True Parameter Values
+```{julia}
+#| output: false
+θ_true = (
+    tvcl  = 5.0,
+    tvv   = 50.0,
+    tvka  = 1.2,
+    tvbio = 1.0,
+    Ω     = Diagonal([0.09, 0.09, 0.09]),   # ~30% CV IIV
+    σ     = 0.2
+)
+```
+
+# Simulation Helpers
+```{julia}
+#| output: false
+function create_be_population(n_per_arm)
+    subjects = Subject[]
+    for trt in ["R", "T"], i in 1:n_per_arm
+        push!(subjects, Subject(
+            id     = length(subjects) + 1,
+            events = DosageRegimen(100, time = 0),
+            covariates = (TRT = trt,)
+        ))
+    end
+    return Population(subjects)
+end
+
+function simulate_be_trial(params; n_per_arm = 30)
+    pop = create_be_population(n_per_arm)
+    return simobs(pkmodel, pop, params; obstimes = 0:1:72)
+end
+```
+
+# Simulate Reference Trial and Fit
+```{julia}
+#| output: false
+ref_sim = simulate_be_trial(θ_true; n_per_arm = 30)
+
+sim_pop = read_pumas(
+    DataFrame(ref_sim);
+    id = :id, time = :time, observations = [:dv],
+    amt = :amt, evid = :evid, covariates = [:TRT], cmt = :cmt
+)
+
+init = (
+    tvcl  = 4.5,
+    tvv   = 45.0,
+    tvka  = 1.0,
+    tvbio = 1.0,
+    Ω     = Diagonal([0.1, 0.1, 0.1]),
+    σ     = 0.3
+)
+
+fit_res = fit(pkmodel, sim_pop, init, Pumas.FOCE())
+θ̂ = coef(fit_res)
+nothing
+```
+
+# Single-Trial BE (Reference Check)
+```{julia}
+#| output: false
+simdf_ref = DataFrame(ref_sim)
+simdf_ref.route .= "ev"
+simdf_ref.dv .= max.(simdf_ref.dv, 0.0)
+
+nca_tbl_ref = with_logger(NullLogger()) do
+    ncapop_ref = read_nca(simdf_ref;
+        id = :id, time = :time, amt = :amt,
+        observations = :dv, route = :route, group = [:TRT]
+    )
+    nca_ref = run_nca(ncapop_ref)
+    nca_ref.reportdf
+end
+```
+
+# Uncertainty Extraction
+
+## Sampling Helper
+```{julia}
+#| output: false
+"""
+Sample `n` parameter NamedTuples from a MvNormal on the estimation (log) scale.
+"""
+function sample_from_vcov(mean_params, V, n)
+    μ = [
+        log(mean_params.tvcl), log(mean_params.tvv),
+        log(mean_params.tvka), log(mean_params.tvbio),
+        log(mean_params.Ω[1,1]), log(mean_params.Ω[2,2]), log(mean_params.Ω[3,3]),
+        log(mean_params.σ)
+    ]
+    dist = MvNormal(μ, Symmetric(V))
+    return [begin
+        s = rand(dist)
+        (tvcl  = exp(s[1]), tvv  = exp(s[2]),
+         tvka  = exp(s[3]), tvbio = exp(s[4]),
+         Ω     = Diagonal([exp(s[5]), exp(s[6]), exp(s[7])]),
+         σ     = exp(s[8]))
+    end for _ in 1:n]
+end
+```
+
+## Method 1: VCOV (Asymptotic Normal)
+```{julia}
+#| output: false
+vcov_param_samples = sample_from_vcov(θ̂, vcov(fit_res), 200)
+```
+
+## Method 2: Bootstrap
+```{julia}
+#| output: false
+boot_settings = Bootstrap(
+    samples = 100,
+    stratify_by = nothing,
+    ensemblealg = EnsembleThreads()
+)
+boot_inf = infer(fit_res, boot_settings; level = 0.95)
+
+boot_param_samples = sample_from_vcov(coef(boot_inf), vcov(boot_inf), 200)
+nothing
+```
+
+## Method 3: SIR
+```{julia}
+#| output: false
+sir_settings = SIR(samples = 200, resamples = 100)
+sir_inf = infer(fit_res, sir_settings; level = 0.95)
+
+sir_param_samples = sample_from_vcov(coef(sir_inf), vcov(sir_inf), 200)
+nothing
+```
+
+# TOST for Parallel-Design BE
+```{julia}
+#| output: false
+"""
+Two One-Sided Tests on log-scale data for two independent groups.
+Returns GMR, 90% CI bounds, and pass/fail status.
+"""
+function tost_test_detailed(log_R, log_T; alpha = 0.05, θ_L = 0.80, θ_U = 1.25)
+    n_R, n_T = length(log_R), length(log_T)
+    (n_R < 2 || n_T < 2) && return (gmr=NaN, ci_lo=NaN, ci_hi=NaN, pass=false)
+    Δ   = mean(log_T) - mean(log_R)
+    sp² = ((n_R - 1) * var(log_R) + (n_T - 1) * var(log_T)) / (n_R + n_T - 2)
+    se  = sqrt(sp² * (1 / n_R + 1 / n_T))
+    df  = n_R + n_T - 2
+    tc  = quantile(TDist(df), 1 - alpha)
+    gmr   = exp(Δ)
+    ci_lo = exp(Δ - tc * se)
+    ci_hi = exp(Δ + tc * se)
+    pass  = ci_lo >= θ_L && ci_hi <= θ_U
+    return (gmr=gmr, ci_lo=ci_lo, ci_hi=ci_hi, pass=pass)
+end
+
+"""Find first matching column from `candidates` in DataFrame `df`."""
+function find_col(df, candidates)
+    ns = names(df)
+    for c in candidates
+        if string(c) in ns
+            return Symbol(c)
+        end
+    end
+    error("None of $candidates found in columns: $ns")
+end
+
+# Detect AUC and Cmax column names once from the reference NCA table
+const AUC_COL  = find_col(nca_tbl_ref, ["aucinf_obs", "aucinf", "auclast", "AUC", "auc"])
+const CMAX_COL = find_col(nca_tbl_ref, ["cmax", "Cmax", "CMAX"])
+println("Using NCA columns: AUC = $AUC_COL, Cmax = $CMAX_COL")
+
+"""Extract non-missing, positive values from a column as Float64 vector."""
+function clean_pk_col(df, col)
+    vals = df[!, col]
+    return Float64[v for v in vals if !ismissing(v) && v > 0]
+end
+
+"""
+Run NCA on a simulated trial, then apply TOST to AUC and Cmax.
+Returns `nothing` if insufficient data.
+"""
+function run_be_on_sim_detailed(sim)
+    simdf = DataFrame(sim)
+    simdf.route .= "ev"
+    simdf.dv .= max.(simdf.dv, 0.0)
+
+    tbl = with_logger(NullLogger()) do
+        ncapop = read_nca(simdf;
+            id = :id, time = :time, amt = :amt,
+            observations = :dv, route = :route, group = [:TRT]
+        )
+        nca_out = run_nca(ncapop)
+        nca_out.reportdf
+    end
+
+    R = tbl[tbl.TRT .== "R", :]
+    T = tbl[tbl.TRT .== "T", :]
+
+    auc_R  = clean_pk_col(R, AUC_COL)
+    auc_T  = clean_pk_col(T, AUC_COL)
+    cmax_R = clean_pk_col(R, CMAX_COL)
+    cmax_T = clean_pk_col(T, CMAX_COL)
+
+    (length(auc_R) < 2 || length(auc_T) < 2)  && return nothing
+    (length(cmax_R) < 2 || length(cmax_T) < 2) && return nothing
+
+    auc_res  = tost_test_detailed(log.(auc_R),  log.(auc_T))
+    cmax_res = tost_test_detailed(log.(cmax_R), log.(cmax_T))
+
+    return (
+        auc_gmr=auc_res.gmr, auc_lo=auc_res.ci_lo, auc_hi=auc_res.ci_hi, auc_pass=auc_res.pass,
+        cmax_gmr=cmax_res.gmr, cmax_lo=cmax_res.ci_lo, cmax_hi=cmax_res.ci_hi, cmax_pass=cmax_res.pass,
+        overall_pass=auc_res.pass && cmax_res.pass
+    )
+end
+```
+
+# %CV Estimation
+```{julia}
+#| output: false
+"""
+Estimate %CV for AUC and Cmax from simulated parallel-design trials.
+"""
+function estimate_cv(param_samples; n_per_arm=60, n_reps=50)
+    auc_vars  = Float64[]
+    cmax_vars = Float64[]
+
+    for _ in 1:n_reps
+        θ_draw = param_samples[rand(1:length(param_samples))]
+        sim_params = merge(θ_draw, (tvbio = 1.0,))
+
+        try
+            sim = simulate_be_trial(sim_params; n_per_arm = n_per_arm)
+            simdf = DataFrame(sim)
+            simdf.route .= "ev"
+            simdf.dv .= max.(simdf.dv, 0.0)
+
+            tbl = with_logger(NullLogger()) do
+                ncapop = read_nca(simdf;
+                    id = :id, time = :time, amt = :amt,
+                    observations = :dv, route = :route, group = [:TRT]
+                )
+                nca_out = run_nca(ncapop)
+                nca_out.reportdf
+            end
+
+            R = tbl[tbl.TRT .== "R", :]
+            T = tbl[tbl.TRT .== "T", :]
+
+            auc_R  = clean_pk_col(R, AUC_COL)
+            auc_T  = clean_pk_col(T, AUC_COL)
+            cmax_R = clean_pk_col(R, CMAX_COL)
+            cmax_T = clean_pk_col(T, CMAX_COL)
+
+            if length(auc_R) >= 2 && length(auc_T) >= 2
+                n_r, n_t = length(auc_R), length(auc_T)
+                sp² = ((n_r - 1) * var(log.(auc_R)) + (n_t - 1) * var(log.(auc_T))) / (n_r + n_t - 2)
+                push!(auc_vars, sp²)
+            end
+            if length(cmax_R) >= 2 && length(cmax_T) >= 2
+                n_r, n_t = length(cmax_R), length(cmax_T)
+                sp² = ((n_r - 1) * var(log.(cmax_R)) + (n_t - 1) * var(log.(cmax_T))) / (n_r + n_t - 2)
+                push!(cmax_vars, sp²)
+            end
+        catch
+            continue
+        end
+    end
+
+    auc_cv  = 100 * sqrt(exp(mean(auc_vars)) - 1)
+    cmax_cv = 100 * sqrt(exp(mean(cmax_vars)) - 1)
+    return (auc_cv=auc_cv, cmax_cv=cmax_cv)
+end
+```
+
+```{julia}
+#| output: false
+fixed_param_samples = fill(θ̂, 100)
+cv_estimates = estimate_cv(fixed_param_samples; n_per_arm = 60, n_reps = 100)
+nothing
+```
+
+```{julia}
+#| echo: false
+println("AUC  %CV = $(round(cv_estimates.auc_cv, digits=1))%")
+println("Cmax %CV = $(round(cv_estimates.cmax_cv, digits=1))%")
+```
+
+# Simulation Configuration
+
+Adjust `N_BATCHES` and `N_SIMS_PER_BATCH` for faster testing
+(e.g., 10 batches × 50 trials).
+
+```{julia}
+#| output: false
+const SAMPLE_SIZES     = [12, 24, 30, 40, 50, 60, 80]
+const TR_RATIOS        = [0.7, 0.9, 1.0, 1.1, 1.3]
+const N_BATCHES        = 200   # macro-replications
+const N_SIMS_PER_BATCH = 200   # trials per macro-replication
+```
+
+# Batch Simulation Engine
+
+For each (sample size, T/R ratio) cell, we run `N_BATCHES` independent batches of
+`N_SIMS_PER_BATCH` trials. Each batch yields one pass-rate estimate. The collection of
+200 batch pass-rates is then summarized into a point estimate and CI.
+
+```{julia}
+#| output: false
+#| code-summary: "Batch simulation engine (click to expand)"
+
+"""
+Run batched virtual BE simulations. Returns a DataFrame with one row per
+(method, tr_ratio, n_per_arm, batch_id).
+"""
+function virtual_be_sim_batched(param_samples, method_name;
+                                tr_ratios  = TR_RATIOS,
+                                n_per_arms = SAMPLE_SIZES,
+                                n_batches  = N_BATCHES,
+                                n_sims     = N_SIMS_PER_BATCH)
+
+    batch_results = DataFrame(
+        method    = String[],
+        tr_ratio  = Float64[],
+        n_per_arm = Int[],
+        batch_id  = Int[],
+        n_pass    = Int[],
+        n_valid   = Int[],
+        pass_rate = Float64[]
+    )
+
+    total_cells = length(n_per_arms) * length(tr_ratios)
+    cell_count  = 0
+
+    for n_arm in n_per_arms, tr in tr_ratios
+        cell_count += 1
+
+        for b in 1:n_batches
+            n_pass  = 0
+            n_error = 0
+
+            for i in 1:n_sims
+                θ_draw     = param_samples[rand(1:length(param_samples))]
+                sim_params = merge(θ_draw, (tvbio = tr,))
+
+                try
+                    sim = simulate_be_trial(sim_params; n_per_arm = n_arm)
+                    res = run_be_on_sim_detailed(sim)
+                    if res === nothing
+                        n_error += 1
+                    else
+                        res.overall_pass && (n_pass += 1)
+                    end
+                catch
+                    n_error += 1
+                end
+            end
+
+            n_valid = n_sims - n_error
+            rate    = n_valid > 0 ? (n_pass / n_valid) * 100 : NaN
+
+            push!(batch_results, (
+                method    = method_name,
+                tr_ratio  = tr,
+                n_per_arm = n_arm,
+                batch_id  = b,
+                n_pass    = n_pass,
+                n_valid   = n_valid,
+                pass_rate = rate
+            ))
+        end
+
+        println("  [$method_name] ($cell_count/$total_cells) n=$n_arm, T/R=$tr — $n_batches batches done")
+    end
+
+    return batch_results
+end
+
+"""
+Aggregate batch-level results into point estimates with CIs.
+Returns a DataFrame with one row per (method, tr_ratio, n_per_arm).
+"""
+function summarize_batches(batch_df)
+    summary = combine(groupby(batch_df, [:method, :tr_ratio, :n_per_arm]),
+        :pass_rate => mean   => :mean_rate,
+        :pass_rate => std    => :std_rate,
+        :pass_rate => length => :n_batches,
+        :pass_rate => (x -> quantile(x, 0.025)) => :pctl_025,
+        :pass_rate => (x -> quantile(x, 0.975)) => :pctl_975
+    )
+    # 95% CI for the true rate (SE-based)
+    summary.se    = summary.std_rate ./ sqrt.(summary.n_batches)
+    summary.ci_lo = max.(summary.mean_rate .- 1.96 .* summary.se, 0.0)
+    summary.ci_hi = min.(summary.mean_rate .+ 1.96 .* summary.se, 100.0)
+    return summary
+end
+```
+
+# Run All Methods
+
+```{julia}
+#| output: false
+
+println("Running Fixed method...")
+batches_fixed = virtual_be_sim_batched(fixed_param_samples, "Fixed")
+
+println("Running VCOV method...")
+batches_vcov  = virtual_be_sim_batched(vcov_param_samples,  "VCOV")
+
+println("Running Bootstrap method...")
+batches_boot  = virtual_be_sim_batched(boot_param_samples,  "Bootstrap")
+
+println("Running SIR method...")
+batches_sir   = virtual_be_sim_batched(sir_param_samples,   "SIR")
+
+# Combine all batch-level results
+all_batches = vcat(batches_fixed, batches_vcov, batches_boot, batches_sir)
+
+# Aggregate into summaries with CIs
+all_summary = summarize_batches(all_batches)
+
+# ── Relative-to-Fixed computation ──
+# Extract Fixed as the reference method
+fixed_ref = select(
+    filter(r -> r.method == "Fixed", all_summary),
+    :tr_ratio, :n_per_arm,
+    :mean_rate => :fixed_mean,
+    :se        => :fixed_se
+)
+
+# Join every non-Fixed method with Fixed's reference values
+relative_df = innerjoin(
+    filter(r -> r.method != "Fixed", all_summary),
+    fixed_ref,
+    on = [:tr_ratio, :n_per_arm]
+)
+
+# Absolute difference (pp): method − Fixed
+relative_df.abs_diff       = relative_df.mean_rate .- relative_df.fixed_mean
+relative_df.abs_diff_se    = sqrt.(relative_df.se.^2 .+ relative_df.fixed_se.^2)
+relative_df.abs_diff_ci_lo = relative_df.abs_diff .- 1.96 .* relative_df.abs_diff_se
+relative_df.abs_diff_ci_hi = relative_df.abs_diff .+ 1.96 .* relative_df.abs_diff_se
+
+# Ratio: method / Fixed  (delta-method SE)
+relative_df.ratio = relative_df.mean_rate ./ max.(relative_df.fixed_mean, 1e-10)
+relative_df.ratio_se = relative_df.ratio .* sqrt.(
+    (relative_df.se ./ max.(relative_df.mean_rate, 1e-10)).^2 .+
+    (relative_df.fixed_se ./ max.(relative_df.fixed_mean, 1e-10)).^2
+)
+relative_df.ratio_ci_lo = relative_df.ratio .- 1.96 .* relative_df.ratio_se
+relative_df.ratio_ci_hi = relative_df.ratio .+ 1.96 .* relative_df.ratio_se
+
+# Guard: set ratio columns to NaN where Fixed rate ≈ 0
+for col in [:ratio, :ratio_se, :ratio_ci_lo, :ratio_ci_hi]
+    relative_df[!, col] = ifelse.(relative_df.fixed_mean .< 0.1, NaN, relative_df[!, col])
+end
+nothing
+```
+
+# Results
+
+## Formatting Helper
+```{julia}
+#| output: false
+fmt_ci(m, lo, hi) = "$(round(m, digits=1)) [$(round(lo, digits=1)), $(round(hi, digits=1))]"
+
+function fmt_diff(d, lo, hi)
+    s = round(d, digits=1) >= 0 ? "+" : ""
+    "$(s)$(round(d, digits=1)) [$(round(lo, digits=1)), $(round(hi, digits=1))]"
+end
+
+function fmt_ratio(r, lo, hi)
+    isnan(r) && return "—"
+    "$(round(r, digits=3)) [$(round(lo, digits=3)), $(round(hi, digits=3))]"
+end
+```
+
+## Power Estimates — T/R = 1.0
+
+Point estimate (%) and 95% CI across 200 batches of 200 trials:
+
+```{julia}
+#| echo: false
+power_at_1 = filter(r -> r.tr_ratio == 1.0, all_summary)
+power_at_1.display = fmt_ci.(power_at_1.mean_rate, power_at_1.ci_lo, power_at_1.ci_hi)
+display(unstack(select(power_at_1, :n_per_arm, :method, :display), :n_per_arm, :method, :display))
+```
+
+## Power Estimates — T/R = 0.9
+
+```{julia}
+#| echo: false
+pow09 = filter(r -> r.tr_ratio == 0.9, all_summary)
+pow09.display = fmt_ci.(pow09.mean_rate, pow09.ci_lo, pow09.ci_hi)
+display(unstack(select(pow09, :n_per_arm, :method, :display), :n_per_arm, :method, :display))
+```
+
+## Power Estimates — T/R = 1.1
+
+```{julia}
+#| echo: false
+pow11 = filter(r -> r.tr_ratio == 1.1, all_summary)
+pow11.display = fmt_ci.(pow11.mean_rate, pow11.ci_lo, pow11.ci_hi)
+display(unstack(select(pow11, :n_per_arm, :method, :display), :n_per_arm, :method, :display))
+```
+
+## Type I Error — T/R = 0.7
+
+```{julia}
+#| echo: false
+t1e_07 = filter(r -> r.tr_ratio == 0.7, all_summary)
+t1e_07.display = fmt_ci.(t1e_07.mean_rate, t1e_07.ci_lo, t1e_07.ci_hi)
+display(unstack(select(t1e_07, :n_per_arm, :method, :display), :n_per_arm, :method, :display))
+```
+
+## Type I Error — T/R = 1.3
+
+```{julia}
+#| echo: false
+t1e_13 = filter(r -> r.tr_ratio == 1.3, all_summary)
+t1e_13.display = fmt_ci.(t1e_13.mean_rate, t1e_13.ci_lo, t1e_13.ci_hi)
+display(unstack(select(t1e_13, :n_per_arm, :method, :display), :n_per_arm, :method, :display))
+```
+
+## Full Results Table (Long Format)
+
+```{julia}
+#| echo: false
+display(select(all_summary,
+    :method, :tr_ratio, :n_per_arm,
+    :mean_rate => ByRow(x -> round(x, digits=2)) => :mean_pct,
+    :ci_lo     => ByRow(x -> round(x, digits=2)) => :ci_lo,
+    :ci_hi     => ByRow(x -> round(x, digits=2)) => :ci_hi,
+    :std_rate  => ByRow(x -> round(x, digits=2)) => :batch_sd,
+    :pctl_025  => ByRow(x -> round(x, digits=2)) => :p2_5,
+    :pctl_975  => ByRow(x -> round(x, digits=2)) => :p97_5
+))
+```
+
+# Results — Relative to Fixed
+
+All tables below show VCOV, Bootstrap, and SIR benchmarked against the Fixed (plug-in)
+method. The Fixed column shows the absolute reference value for context.
+
+## Difference from Fixed (pp) — Power at T/R = 1.0
+
+```{julia}
+#| echo: false
+sub_diff = filter(r -> r.tr_ratio == 1.0, relative_df)
+sub_diff_disp = copy(sub_diff)
+sub_diff_disp.display = fmt_diff.(sub_diff_disp.abs_diff, sub_diff_disp.abs_diff_ci_lo, sub_diff_disp.abs_diff_ci_hi)
+diff_wide = unstack(select(sub_diff_disp, :n_per_arm, :method, :display), :n_per_arm, :method, :display)
+
+# Add Fixed reference column
+fixed_abs = filter(r -> r.method == "Fixed" && r.tr_ratio == 1.0, all_summary)
+fixed_abs_disp = DataFrame(n_per_arm = fixed_abs.n_per_arm,
+    Fixed_ref = fmt_ci.(fixed_abs.mean_rate, fixed_abs.ci_lo, fixed_abs.ci_hi))
+display(innerjoin(fixed_abs_disp, diff_wide, on = :n_per_arm))
+```
+
+## Difference from Fixed (pp) — Power at T/R = 0.9
+
+```{julia}
+#| echo: false
+sub09 = filter(r -> r.tr_ratio == 0.9, relative_df)
+sub09.display = fmt_diff.(sub09.abs_diff, sub09.abs_diff_ci_lo, sub09.abs_diff_ci_hi)
+diff09 = unstack(select(sub09, :n_per_arm, :method, :display), :n_per_arm, :method, :display)
+fixed09 = filter(r -> r.method == "Fixed" && r.tr_ratio == 0.9, all_summary)
+fixed09d = DataFrame(n_per_arm = fixed09.n_per_arm,
+    Fixed_ref = fmt_ci.(fixed09.mean_rate, fixed09.ci_lo, fixed09.ci_hi))
+display(innerjoin(fixed09d, diff09, on = :n_per_arm))
+```
+
+## Difference from Fixed (pp) — Power at T/R = 1.1
+
+```{julia}
+#| echo: false
+sub11 = filter(r -> r.tr_ratio == 1.1, relative_df)
+sub11.display = fmt_diff.(sub11.abs_diff, sub11.abs_diff_ci_lo, sub11.abs_diff_ci_hi)
+diff11 = unstack(select(sub11, :n_per_arm, :method, :display), :n_per_arm, :method, :display)
+fixed11 = filter(r -> r.method == "Fixed" && r.tr_ratio == 1.1, all_summary)
+fixed11d = DataFrame(n_per_arm = fixed11.n_per_arm,
+    Fixed_ref = fmt_ci.(fixed11.mean_rate, fixed11.ci_lo, fixed11.ci_hi))
+display(innerjoin(fixed11d, diff11, on = :n_per_arm))
+```
+
+## Difference from Fixed (pp) — Type I Error at T/R = 0.7
+
+```{julia}
+#| echo: false
+sub07 = filter(r -> r.tr_ratio == 0.7, relative_df)
+sub07.display = fmt_diff.(sub07.abs_diff, sub07.abs_diff_ci_lo, sub07.abs_diff_ci_hi)
+diff07 = unstack(select(sub07, :n_per_arm, :method, :display), :n_per_arm, :method, :display)
+fixed07 = filter(r -> r.method == "Fixed" && r.tr_ratio == 0.7, all_summary)
+fixed07d = DataFrame(n_per_arm = fixed07.n_per_arm,
+    Fixed_ref = fmt_ci.(fixed07.mean_rate, fixed07.ci_lo, fixed07.ci_hi))
+display(innerjoin(fixed07d, diff07, on = :n_per_arm))
+```
+
+## Difference from Fixed (pp) — Type I Error at T/R = 1.3
+
+```{julia}
+#| echo: false
+sub13 = filter(r -> r.tr_ratio == 1.3, relative_df)
+sub13.display = fmt_diff.(sub13.abs_diff, sub13.abs_diff_ci_lo, sub13.abs_diff_ci_hi)
+diff13 = unstack(select(sub13, :n_per_arm, :method, :display), :n_per_arm, :method, :display)
+fixed13 = filter(r -> r.method == "Fixed" && r.tr_ratio == 1.3, all_summary)
+fixed13d = DataFrame(n_per_arm = fixed13.n_per_arm,
+    Fixed_ref = fmt_ci.(fixed13.mean_rate, fixed13.ci_lo, fixed13.ci_hi))
+display(innerjoin(fixed13d, diff13, on = :n_per_arm))
+```
+
+## Ratio to Fixed — Power at T/R = 1.0
+
+Values > 1 indicate the method yields higher power than Fixed; < 1 indicates lower.
+
+```{julia}
+#| echo: false
+rat10 = filter(r -> r.tr_ratio == 1.0, relative_df)
+rat10.display = fmt_ratio.(rat10.ratio, rat10.ratio_ci_lo, rat10.ratio_ci_hi)
+rat10w = unstack(select(rat10, :n_per_arm, :method, :display), :n_per_arm, :method, :display)
+display(innerjoin(fixed_abs_disp, rat10w, on = :n_per_arm))
+```
+
+## Ratio to Fixed — Type I Error at T/R = 0.7
+
+```{julia}
+#| echo: false
+rat07 = filter(r -> r.tr_ratio == 0.7, relative_df)
+rat07.display = fmt_ratio.(rat07.ratio, rat07.ratio_ci_lo, rat07.ratio_ci_hi)
+rat07w = unstack(select(rat07, :n_per_arm, :method, :display), :n_per_arm, :method, :display)
+display(innerjoin(fixed07d, rat07w, on = :n_per_arm))
+```
+
+## Ratio to Fixed — Type I Error at T/R = 1.3
+
+```{julia}
+#| echo: false
+rat13 = filter(r -> r.tr_ratio == 1.3, relative_df)
+rat13.display = fmt_ratio.(rat13.ratio, rat13.ratio_ci_lo, rat13.ratio_ci_hi)
+rat13w = unstack(select(rat13, :n_per_arm, :method, :display), :n_per_arm, :method, :display)
+display(innerjoin(fixed13d, rat13w, on = :n_per_arm))
+```
+
+## Full Relative Results Table (Long Format)
+
+```{julia}
+#| echo: false
+display(select(relative_df,
+    :method, :tr_ratio, :n_per_arm,
+    :fixed_mean  => ByRow(x -> round(x, digits=2)) => :fixed_pct,
+    :mean_rate   => ByRow(x -> round(x, digits=2)) => :method_pct,
+    :abs_diff    => ByRow(x -> round(x, digits=2)) => :diff_pp,
+    :abs_diff_ci_lo => ByRow(x -> round(x, digits=2)) => :diff_ci_lo,
+    :abs_diff_ci_hi => ByRow(x -> round(x, digits=2)) => :diff_ci_hi,
+    :ratio       => ByRow(x -> isnan(x) ? missing : round(x, digits=3)) => :ratio,
+    :ratio_ci_lo => ByRow(x -> isnan(x) ? missing : round(x, digits=3)) => :ratio_ci_lo,
+    :ratio_ci_hi => ByRow(x -> isnan(x) ? missing : round(x, digits=3)) => :ratio_ci_hi
+))
+```
+
+# Visualization: Pass Rate Curves with CI Bands
+```{julia}
+#| label: fig-passrate-ci-bands
+#| fig-cap: "BE pass rate (± 95% CI band) across T/R ratios and sample sizes for each uncertainty method."
+fig1 = Figure(size = (1400, 900))
+methods_list = ["Fixed", "VCOV", "Bootstrap", "SIR"]
+size_colors  = [:indigo, :dodgerblue, :steelblue, :seagreen, :orange, :crimson, :darkred]
+
+for (idx, m) in enumerate(methods_list)
+    row = (idx - 1) ÷ 2 + 1
+    col = (idx - 1) % 2 + 1
+    ax = Axis(fig1[row, col];
+        xlabel = "T/R Ratio",
+        ylabel = "BE Pass Rate (%)",
+        title  = "$m Method",
+        xticks = TR_RATIOS,
+        yticks = 0:10:100
+    )
+
+    sub = filter(r -> r.method == m, all_summary)
+    for (j, n) in enumerate(SAMPLE_SIZES)
+        sub_n = sort(filter(r -> r.n_per_arm == n, sub), :tr_ratio)
+        nrow(sub_n) == 0 && continue
+
+        # CI band
+        band!(ax, sub_n.tr_ratio, sub_n.ci_lo, sub_n.ci_hi;
+            color = (size_colors[j], 0.15))
+
+        # Mean line
+        scatterlines!(ax, sub_n.tr_ratio, sub_n.mean_rate;
+            label     = "n=$n",
+            color     = size_colors[j],
+            marker    = :circle,
+            markersize = 7,
+            linewidth = 2
+        )
+    end
+
+    hlines!(ax, [5.0]; color = :red, linestyle = :dash, linewidth = 1, label = "5% α")
+    vlines!(ax, [0.80, 1.25]; color = :gray70, linestyle = :dot, linewidth = 1)
+
+    if idx == 2
+        axislegend(ax; position = :rt, labelsize = 9)
+    end
+end
+
+Label(fig1[0, :], "BE Pass Rate by T/R Ratio and Sample Size (Mean ± 95% CI)"; fontsize = 20)
+fig1
+```
+
+# Visualization: Power at T/R = 1.0 with Error Bars
+```{julia}
+#| label: fig-power-errorbars
+#| fig-cap: "Statistical power at T/R = 1.0 by sample size, with 95% CI error bars."
+fig2 = Figure(size = (1000, 600))
+ax2 = Axis(fig2[1, 1];
+    xlabel = "Subjects per Arm",
+    ylabel = "Power (%)",
+    title  = "Power at T/R = 1.0 (200 Batches × 200 Trials)",
+    xticks = SAMPLE_SIZES,
+    yticks = 0:10:100
+)
+
+method_colors = [:steelblue, :crimson, :seagreen, :darkorange]
+method_shapes = [:circle, :diamond, :utriangle, :rect]
+method_offsets = [-1.5, -0.5, 0.5, 1.5]  # slight x-offset to avoid overlap
+
+for (i, m) in enumerate(methods_list)
+    sub = sort(filter(r -> r.method == m && r.tr_ratio == 1.0, all_summary), :n_per_arm)
+    nrow(sub) == 0 && continue
+    x_shifted = sub.n_per_arm .+ method_offsets[i]
+
+    errorbars!(ax2, x_shifted, sub.mean_rate,
+        sub.mean_rate .- sub.ci_lo, sub.ci_hi .- sub.mean_rate;
+        color = method_colors[i], linewidth = 1.5, whiskerwidth = 8)
+
+    scatterlines!(ax2, x_shifted, sub.mean_rate;
+        label      = m,
+        color      = method_colors[i],
+        marker     = method_shapes[i],
+        markersize = 12,
+        linewidth  = 2
+    )
+end
+
+hlines!(ax2, [80.0]; color = :gray, linestyle = :dash, linewidth = 1, label = "80% target")
+axislegend(ax2; position = :rb)
+fig2
+```
+
+# Visualization: Power at T/R = 0.9 and T/R = 1.1
+```{julia}
+#| label: fig-power-boundary
+#| fig-cap: "Power near boundary T/R ratios (0.9 and 1.1) by sample size."
+fig2b = Figure(size = (1200, 550))
+
+for (pidx, tr_val) in enumerate([0.9, 1.1])
+    ax = Axis(fig2b[1, pidx];
+        xlabel = "Subjects per Arm",
+        ylabel = "Power (%)",
+        title  = "Power at T/R = $tr_val",
+        xticks = SAMPLE_SIZES,
+        yticks = 0:10:100
+    )
+
+    for (i, m) in enumerate(methods_list)
+        sub = sort(filter(r -> r.method == m && r.tr_ratio == tr_val, all_summary), :n_per_arm)
+        nrow(sub) == 0 && continue
+        x_shifted = sub.n_per_arm .+ method_offsets[i]
+
+        errorbars!(ax, x_shifted, sub.mean_rate,
+            sub.mean_rate .- sub.ci_lo, sub.ci_hi .- sub.mean_rate;
+            color = method_colors[i], linewidth = 1.5, whiskerwidth = 8)
+
+        scatterlines!(ax, x_shifted, sub.mean_rate;
+            label      = m,
+            color      = method_colors[i],
+            marker     = method_shapes[i],
+            markersize = 10,
+            linewidth  = 2
+        )
+    end
+
+    hlines!(ax, [80.0]; color = :gray, linestyle = :dash, linewidth = 1, label = "80% target")
+    if pidx == 2
+        axislegend(ax; position = :rb, labelsize = 9)
+    end
+end
+
+Label(fig2b[0, :], "Power Near BE Boundary (Mean ± 95% CI)"; fontsize = 18)
+fig2b
+```
+
+# Visualization: Type I Error with Error Bars
+```{julia}
+#| label: fig-type1-errorbars
+#| fig-cap: "Type I error rate at T/R = 0.7 and T/R = 1.3 by sample size."
+fig3 = Figure(size = (1200, 550))
+
+for (pidx, tr_val) in enumerate([0.7, 1.3])
+    ax = Axis(fig3[1, pidx];
+        xlabel = "Subjects per Arm",
+        ylabel = "Type I Error (%)",
+        title  = "Type I Error at T/R = $tr_val",
+        xticks = SAMPLE_SIZES,
+        yticks = 0:1:10
+    )
+
+    for (i, m) in enumerate(methods_list)
+        sub = sort(filter(r -> r.method == m && r.tr_ratio == tr_val, all_summary), :n_per_arm)
+        nrow(sub) == 0 && continue
+        x_shifted = sub.n_per_arm .+ method_offsets[i]
+
+        errorbars!(ax, x_shifted, sub.mean_rate,
+            sub.mean_rate .- sub.ci_lo, sub.ci_hi .- sub.mean_rate;
+            color = method_colors[i], linewidth = 1.5, whiskerwidth = 8)
+
+        scatterlines!(ax, x_shifted, sub.mean_rate;
+            label      = m,
+            color      = method_colors[i],
+            marker     = method_shapes[i],
+            markersize = 10,
+            linewidth  = 2
+        )
+    end
+
+    hlines!(ax, [5.0]; color = :red, linestyle = :dash, linewidth = 1.5, label = "5% α (nominal)")
+    if pidx == 2
+        axislegend(ax; position = :rt, labelsize = 9)
+    end
+end
+
+Label(fig3[0, :], "Type I Error Rate (Mean ± 95% CI)"; fontsize = 18)
+fig3
+```
+
+# Visualization: Method Comparison Bar Chart
+
+Grouped bar plot at n = 30 per arm, showing all T/R ratios:
+
+```{julia}
+#| label: fig-bar-comparison
+#| fig-cap: "Method comparison at n = 30 per arm: pass rate with 95% CI error bars."
+fig4 = Figure(size = (1200, 600))
+ax4 = Axis(fig4[1, 1];
+    xlabel = "T/R Ratio",
+    ylabel = "BE Pass Rate (%)",
+    title  = "Method Comparison at n = 30 per Arm (Mean ± 95% CI)",
+    xticks = (1:length(TR_RATIOS), string.(TR_RATIOS)),
+    yticks = 0:10:100
+)
+
+n_methods = length(methods_list)
+bar_width = 0.8 / n_methods
+offsets   = [(i - (n_methods + 1) / 2) * bar_width for i in 1:n_methods]
+
+for (i, m) in enumerate(methods_list)
+    sub = sort(filter(r -> r.method == m && r.n_per_arm == 30, all_summary), :tr_ratio)
+    nrow(sub) == 0 && continue
+    x_pos = (1:nrow(sub)) .+ offsets[i]
+
+    barplot!(ax4, x_pos, sub.mean_rate;
+        width = bar_width * 0.9,
+        color = (method_colors[i], 0.8),
+        label = m
+    )
+    errorbars!(ax4, x_pos, sub.mean_rate,
+        sub.mean_rate .- sub.ci_lo, sub.ci_hi .- sub.mean_rate;
+        color = :black, linewidth = 1, whiskerwidth = 4)
+end
+
+hlines!(ax4, [5.0]; color = :red, linestyle = :dash, linewidth = 1, label = "5% α")
+axislegend(ax4; position = :ct, labelsize = 10)
+fig4
+```
+
+# Visualization: Bar Chart at Multiple Sample Sizes
+
+```{julia}
+#| label: fig-bar-by-n
+#| fig-cap: "Pass rate (mean ± 95% CI) at T/R = 1.0 for different sample sizes and methods."
+fig4b = Figure(size = (1200, 600))
+ax4b = Axis(fig4b[1, 1];
+    xlabel = "Subjects per Arm",
+    ylabel = "Power (%)",
+    title  = "Power at T/R = 1.0 — All Sample Sizes (Mean ± 95% CI)",
+    xticks = (1:length(SAMPLE_SIZES), string.(SAMPLE_SIZES)),
+    yticks = 0:10:100
+)
+
+for (i, m) in enumerate(methods_list)
+    sub = sort(filter(r -> r.method == m && r.tr_ratio == 1.0, all_summary), :n_per_arm)
+    nrow(sub) == 0 && continue
+    x_pos = (1:nrow(sub)) .+ offsets[i]
+
+    barplot!(ax4b, x_pos, sub.mean_rate;
+        width = bar_width * 0.9,
+        color = (method_colors[i], 0.8),
+        label = m
+    )
+    errorbars!(ax4b, x_pos, sub.mean_rate,
+        sub.mean_rate .- sub.ci_lo, sub.ci_hi .- sub.mean_rate;
+        color = :black, linewidth = 1, whiskerwidth = 4)
+end
+
+hlines!(ax4b, [80.0]; color = :gray, linestyle = :dash, linewidth = 1, label = "80% target")
+axislegend(ax4b; position = :rb, labelsize = 10)
+fig4b
+```
+
+# Visualization: Box Plots of Batch Pass Rates
+
+Distribution of 200 batch-level pass rates at T/R = 1.0, showing variability
+across macro-replications:
+
+```{julia}
+#| label: fig-boxplots
+#| fig-cap: "Distribution of batch-level pass rates (200 batches) at T/R = 1.0, by sample size."
+fig5 = Figure(size = (1400, 900))
+
+for (idx, m) in enumerate(methods_list)
+    row = (idx - 1) ÷ 2 + 1
+    col = (idx - 1) % 2 + 1
+    ax = Axis(fig5[row, col];
+        xlabel = "Subjects per Arm",
+        ylabel = "Batch Pass Rate (%)",
+        title  = "$m Method",
+        xticks = (1:length(SAMPLE_SIZES), string.(SAMPLE_SIZES)),
+        yticks = 0:10:100
+    )
+
+    sub = filter(r -> r.method == m && r.tr_ratio == 1.0, all_batches)
+    nrow(sub) == 0 && continue
+
+    # Map n_per_arm to integer positions for boxplot
+    positions = [findfirst(==(n), SAMPLE_SIZES) for n in sub.n_per_arm]
+
+    boxplot!(ax, positions, sub.pass_rate;
+        color = (method_colors[idx], 0.6),
+        whiskerwidth = 0.5,
+        mediancolor  = :black
+    )
+
+    hlines!(ax, [80.0]; color = :gray, linestyle = :dash, linewidth = 1)
+end
+
+Label(fig5[0, :], "Distribution of Batch Pass Rates at T/R = 1.0 (200 Batches × 200 Trials)"; fontsize = 18)
+fig5
+```
+
+# Visualization: Box Plots at T/R = 0.7 (Type I Error)
+
+```{julia}
+#| label: fig-boxplots-t1e
+#| fig-cap: "Distribution of batch-level pass rates at T/R = 0.7 (type I error region)."
+fig5b = Figure(size = (1400, 900))
+
+for (idx, m) in enumerate(methods_list)
+    row = (idx - 1) ÷ 2 + 1
+    col = (idx - 1) % 2 + 1
+    ax = Axis(fig5b[row, col];
+        xlabel = "Subjects per Arm",
+        ylabel = "Batch Pass Rate (%)",
+        title  = "$m Method",
+        xticks = (1:length(SAMPLE_SIZES), string.(SAMPLE_SIZES)),
+        yticks = 0:1:15
+    )
+
+    sub = filter(r -> r.method == m && r.tr_ratio == 0.7, all_batches)
+    nrow(sub) == 0 && continue
+
+    positions = [findfirst(==(n), SAMPLE_SIZES) for n in sub.n_per_arm]
+
+    boxplot!(ax, positions, sub.pass_rate;
+        color = (method_colors[idx], 0.6),
+        whiskerwidth = 0.5,
+        mediancolor  = :black
+    )
+
+    hlines!(ax, [5.0]; color = :red, linestyle = :dash, linewidth = 1.5)
+end
+
+Label(fig5b[0, :], "Distribution of Batch Pass Rates at T/R = 0.7 — Type I Error (200 Batches)"; fontsize = 18)
+fig5b
+```
+
+# Visualization: Forest Plot — Power at T/R = 1.0
+```{julia}
+#| label: fig-forest-power
+#| fig-cap: "Forest plot of power estimates (point ± 95% CI) at T/R = 1.0 across all methods and sample sizes."
+fig6 = Figure(size = (900, 900))
+ax6 = Axis(fig6[1, 1];
+    xlabel = "Power (%)",
+    title  = "Forest Plot — Power at T/R = 1.0"
+)
+
+# Build labels and collect data
+forest_sub = sort(filter(r -> r.tr_ratio == 1.0, all_summary), [:method, :n_per_arm])
+n_rows  = nrow(forest_sub)
+y_pos   = collect(n_rows:-1:1)
+y_ticks = String[]
+y_colors = Symbol[]
+
+row_idx = 0
+for m in methods_list
+    sub_m = sort(filter(r -> r.method == m, forest_sub), :n_per_arm)
+    for r in eachrow(sub_m)
+        row_idx += 1
+        push!(y_ticks, "$(r.method), n=$(r.n_per_arm)")
+        push!(y_colors, method_colors[findfirst(==(m), methods_list)])
+    end
+end
+
+ax6.yticks = (y_pos, y_ticks)
+ax6.yticklabelsize = 10
+
+# Plot CIs and point estimates
+for (i, r) in enumerate(eachrow(forest_sub))
+    y = y_pos[i]
+    mc = method_colors[findfirst(==(r.method), methods_list)]
+    errorbars!(ax6, [r.mean_rate], [y], [r.mean_rate - r.ci_lo], [r.ci_hi - r.mean_rate];
+        direction = :x, color = mc, linewidth = 2, whiskerwidth = 6)
+    scatter!(ax6, [r.mean_rate], [y];
+        color = mc, markersize = 10, marker = :circle)
+end
+
+vlines!(ax6, [80.0]; color = :gray, linestyle = :dash, linewidth = 1)
+fig6
+```
+
+# Visualization: Forest Plot — Type I Error at T/R = 0.7
+```{julia}
+#| label: fig-forest-t1e
+#| fig-cap: "Forest plot of type I error rate estimates at T/R = 0.7."
+fig6b = Figure(size = (900, 900))
+ax6b = Axis(fig6b[1, 1];
+    xlabel = "Type I Error (%)",
+    title  = "Forest Plot — Type I Error at T/R = 0.7"
+)
+
+forest_t1e = sort(filter(r -> r.tr_ratio == 0.7, all_summary), [:method, :n_per_arm])
+n_rows_t = nrow(forest_t1e)
+y_pos_t  = collect(n_rows_t:-1:1)
+y_ticks_t = String[]
+
+for r in eachrow(forest_t1e)
+    push!(y_ticks_t, "$(r.method), n=$(r.n_per_arm)")
+end
+
+ax6b.yticks = (y_pos_t, y_ticks_t)
+ax6b.yticklabelsize = 10
+
+for (i, r) in enumerate(eachrow(forest_t1e))
+    y = y_pos_t[i]
+    mc = method_colors[findfirst(==(r.method), methods_list)]
+    errorbars!(ax6b, [r.mean_rate], [y], [r.mean_rate - r.ci_lo], [r.ci_hi - r.mean_rate];
+        direction = :x, color = mc, linewidth = 2, whiskerwidth = 6)
+    scatter!(ax6b, [r.mean_rate], [y];
+        color = mc, markersize = 10, marker = :circle)
+end
+
+vlines!(ax6b, [5.0]; color = :red, linestyle = :dash, linewidth = 1.5)
+fig6b
+```
+
+# Visualization: Heatmap of Mean Pass Rates
+```{julia}
+#| label: fig-heatmaps
+#| fig-cap: "Heatmap of mean BE pass rates (with CI width annotation) by sample size and T/R ratio."
+fig7 = Figure(size = (1400, 900))
+
+for (idx, m) in enumerate(methods_list)
+    row = (idx - 1) ÷ 2 + 1
+    col = (idx - 1) % 2 + 1
+
+    sub = filter(r -> r.method == m, all_summary)
+    mat_mean = zeros(length(SAMPLE_SIZES), length(TR_RATIOS))
+    mat_ci   = zeros(length(SAMPLE_SIZES), length(TR_RATIOS))
+
+    for (i, n) in enumerate(SAMPLE_SIZES), (j, tr) in enumerate(TR_RATIOS)
+        r = filter(r -> r.n_per_arm == n && r.tr_ratio == tr, sub)
+        if nrow(r) > 0
+            mat_mean[i, j] = r.mean_rate[1]
+            mat_ci[i, j]   = r.ci_hi[1] - r.ci_lo[1]
+        else
+            mat_mean[i, j] = NaN
+            mat_ci[i, j]   = NaN
+        end
+    end
+
+    ax = Axis(fig7[row, col];
+        xlabel = "T/R Ratio",
+        ylabel = "Subjects per Arm",
+        title  = "$m Method",
+        xticks = (1:length(TR_RATIOS), string.(TR_RATIOS)),
+        yticks = (1:length(SAMPLE_SIZES), string.(SAMPLE_SIZES))
+    )
+
+    hm = heatmap!(ax, 1:length(TR_RATIOS), 1:length(SAMPLE_SIZES), mat_mean';
+        colormap = :RdYlGn, colorrange = (0, 100)
+    )
+
+    # Annotate with "mean% ± ci_width"
+    for (i, n) in enumerate(SAMPLE_SIZES), (j, tr) in enumerate(TR_RATIOS)
+        mn = mat_mean[i, j]
+        cw = mat_ci[i, j]
+        txt = isnan(mn) ? "—" : "$(round(Int, mn))% ±$(round(cw, digits=1))"
+        text!(ax, j, i; text = txt, align = (:center, :center),
+            fontsize = 9, color = mn > 50 ? :black : :white)
+    end
+
+    if idx == 2
+        Colorbar(fig7[row, col + 1], hm; label = "Mean Pass Rate (%)")
+    end
+end
+
+Label(fig7[0, :], "BE Pass Rate Heatmap: Mean ± CI Width"; fontsize = 20)
+fig7
+```
+
+# Visualization: CI Width vs Sample Size
+
+How the precision of the power estimate improves with sample size:
+
+```{julia}
+#| label: fig-ci-width-by-n
+#| fig-cap: "Width of the 95% CI for power/type I error as a function of sample size."
+fig8 = Figure(size = (1200, 550))
+
+for (pidx, tr_val, title_str) in [(1, 1.0, "Power CI Width (T/R = 1.0)"),
+                                    (2, 0.7, "Type I Error CI Width (T/R = 0.7)")]
+    ax = Axis(fig8[1, pidx];
+        xlabel = "Subjects per Arm",
+        ylabel = "95% CI Width (pp)",
+        title  = title_str,
+        xticks = SAMPLE_SIZES
+    )
+
+    for (i, m) in enumerate(methods_list)
+        sub = sort(filter(r -> r.method == m && r.tr_ratio == tr_val, all_summary), :n_per_arm)
+        nrow(sub) == 0 && continue
+        ci_widths = sub.ci_hi .- sub.ci_lo
+
+        scatterlines!(ax, sub.n_per_arm, ci_widths;
+            label      = m,
+            color      = method_colors[i],
+            marker     = method_shapes[i],
+            markersize = 10,
+            linewidth  = 2
+        )
+    end
+
+    if pidx == 1
+        axislegend(ax; position = :rt, labelsize = 9)
+    end
+end
+
+Label(fig8[0, :], "Precision of Estimated Operating Characteristics"; fontsize = 18)
+fig8
+```
+
+# Visualization: Absolute Difference from Fixed (pp)
+
+Power (T/R = 1.0) and Type I Error (T/R = 0.7) — how much each uncertainty
+method's estimate deviates from the Fixed plug-in baseline, in percentage points:
+
+```{julia}
+#| label: fig-diff-from-fixed
+#| fig-cap: "Absolute difference (pp) from Fixed method, with 95% CI. Zero = no difference."
+rel_methods = ["VCOV", "Bootstrap", "SIR"]
+rel_colors  = [:crimson, :seagreen, :darkorange]
+rel_shapes  = [:diamond, :utriangle, :rect]
+rel_offsets = [-1.0, 0.0, 1.0]
+
+fig_d1 = Figure(size = (1200, 550))
+
+for (pidx, tr_val, ylab, title_str) in [
+        (1, 1.0, "Δ Power (pp)", "Power Difference (T/R = 1.0)"),
+        (2, 0.7, "Δ Type I Error (pp)", "Type I Error Difference (T/R = 0.7)")]
+
+    ax = Axis(fig_d1[1, pidx];
+        xlabel = "Subjects per Arm",
+        ylabel = ylab,
+        title  = title_str,
+        xticks = SAMPLE_SIZES
+    )
+
+    for (i, m) in enumerate(rel_methods)
+        sub = sort(filter(r -> r.method == m && r.tr_ratio == tr_val, relative_df), :n_per_arm)
+        nrow(sub) == 0 && continue
+        x_shifted = sub.n_per_arm .+ rel_offsets[i]
+
+        errorbars!(ax, x_shifted, sub.abs_diff,
+            sub.abs_diff .- sub.abs_diff_ci_lo, sub.abs_diff_ci_hi .- sub.abs_diff;
+            color = rel_colors[i], linewidth = 1.5, whiskerwidth = 8)
+
+        scatterlines!(ax, x_shifted, sub.abs_diff;
+            label      = m,
+            color      = rel_colors[i],
+            marker     = rel_shapes[i],
+            markersize = 10,
+            linewidth  = 2
+        )
+    end
+
+    hlines!(ax, [0.0]; color = :black, linestyle = :dash, linewidth = 1, label = "Fixed (ref)")
+    if pidx == 1
+        axislegend(ax; position = :rb, labelsize = 9)
+    end
+end
+
+Label(fig_d1[0, :], "Difference from Fixed Method (pp, Mean ± 95% CI)"; fontsize = 18)
+fig_d1
+```
+
+# Visualization: Absolute Difference — All T/R Ratios
+
+```{julia}
+#| label: fig-diff-all-tr
+#| fig-cap: "Difference from Fixed across all T/R ratios and sample sizes (one panel per non-Fixed method)."
+fig_d1b = Figure(size = (1400, 500))
+
+for (idx, m) in enumerate(rel_methods)
+    ax = Axis(fig_d1b[1, idx];
+        xlabel = "T/R Ratio",
+        ylabel = idx == 1 ? "Δ Pass Rate (pp)" : "",
+        title  = "$m − Fixed",
+        xticks = TR_RATIOS,
+    )
+
+    sub = filter(r -> r.method == m, relative_df)
+    for (j, n) in enumerate(SAMPLE_SIZES)
+        sub_n = sort(filter(r -> r.n_per_arm == n, sub), :tr_ratio)
+        nrow(sub_n) == 0 && continue
+
+        band!(ax, sub_n.tr_ratio, sub_n.abs_diff_ci_lo, sub_n.abs_diff_ci_hi;
+            color = (size_colors[j], 0.15))
+        scatterlines!(ax, sub_n.tr_ratio, sub_n.abs_diff;
+            label     = "n=$n",
+            color     = size_colors[j],
+            marker    = :circle,
+            markersize = 6,
+            linewidth = 1.5
+        )
+    end
+
+    hlines!(ax, [0.0]; color = :black, linestyle = :dash, linewidth = 1)
+    if idx == 3
+        axislegend(ax; position = :rt, labelsize = 8)
+    end
+end
+
+Label(fig_d1b[0, :], "Pass Rate Difference from Fixed (pp, Mean ± 95% CI Band)"; fontsize = 18)
+fig_d1b
+```
+
+# Visualization: Ratio to Fixed
+
+Ratio > 1 means the method yields a higher rate than Fixed; < 1 means lower.
+
+```{julia}
+#| label: fig-ratio-to-fixed
+#| fig-cap: "Ratio of pass rate to Fixed method, with 95% CI. Unity = identical to Fixed."
+fig_r1 = Figure(size = (1200, 550))
+
+for (pidx, tr_val, ylab, title_str) in [
+        (1, 1.0, "Power Ratio", "Power Ratio (T/R = 1.0)"),
+        (2, 0.7, "T1E Ratio", "Type I Error Ratio (T/R = 0.7)")]
+
+    ax = Axis(fig_r1[1, pidx];
+        xlabel = "Subjects per Arm",
+        ylabel = ylab,
+        title  = title_str,
+        xticks = SAMPLE_SIZES
+    )
+
+    for (i, m) in enumerate(rel_methods)
+        sub = sort(filter(r -> r.method == m && r.tr_ratio == tr_val, relative_df), :n_per_arm)
+        nrow(sub) == 0 && continue
+        # Skip NaN rows
+        valid = .!isnan.(sub.ratio)
+        sub_v = sub[valid, :]
+        nrow(sub_v) == 0 && continue
+        x_shifted = sub_v.n_per_arm .+ rel_offsets[i]
+
+        errorbars!(ax, x_shifted, sub_v.ratio,
+            sub_v.ratio .- sub_v.ratio_ci_lo, sub_v.ratio_ci_hi .- sub_v.ratio;
+            color = rel_colors[i], linewidth = 1.5, whiskerwidth = 8)
+
+        scatterlines!(ax, x_shifted, sub_v.ratio;
+            label      = m,
+            color      = rel_colors[i],
+            marker     = rel_shapes[i],
+            markersize = 10,
+            linewidth  = 2
+        )
+    end
+
+    hlines!(ax, [1.0]; color = :black, linestyle = :dash, linewidth = 1, label = "Fixed (ref)")
+    if pidx == 1
+        axislegend(ax; position = :rb, labelsize = 9)
+    end
+end
+
+Label(fig_r1[0, :], "Ratio to Fixed Method (Mean ± 95% CI)"; fontsize = 18)
+fig_r1
+```
+
+# Visualization: Grouped Bar Chart — Difference from Fixed at n = 30
+
+```{julia}
+#| label: fig-diff-bars-n30
+#| fig-cap: "Absolute difference (pp) from Fixed at n = 30, grouped by T/R ratio."
+fig_db = Figure(size = (1200, 600))
+ax_db = Axis(fig_db[1, 1];
+    xlabel = "T/R Ratio",
+    ylabel = "Δ Pass Rate vs Fixed (pp)",
+    title  = "Difference from Fixed at n = 30 per Arm (Mean ± 95% CI)",
+    xticks = (1:length(TR_RATIOS), string.(TR_RATIOS))
+)
+
+n_rel = length(rel_methods)
+bw_rel = 0.8 / n_rel
+off_rel = [(i - (n_rel + 1) / 2) * bw_rel for i in 1:n_rel]
+
+for (i, m) in enumerate(rel_methods)
+    sub = sort(filter(r -> r.method == m && r.n_per_arm == 30, relative_df), :tr_ratio)
+    nrow(sub) == 0 && continue
+    x_pos = (1:nrow(sub)) .+ off_rel[i]
+
+    barplot!(ax_db, x_pos, sub.abs_diff;
+        width = bw_rel * 0.9,
+        color = (rel_colors[i], 0.8),
+        label = m
+    )
+    errorbars!(ax_db, x_pos, sub.abs_diff,
+        sub.abs_diff .- sub.abs_diff_ci_lo, sub.abs_diff_ci_hi .- sub.abs_diff;
+        color = :black, linewidth = 1, whiskerwidth = 4)
+end
+
+hlines!(ax_db, [0.0]; color = :black, linestyle = :dash, linewidth = 1, label = "Fixed (ref)")
+axislegend(ax_db; position = :ct, labelsize = 10)
+fig_db
+```
+
+# Visualization: Forest Plot — Differences at T/R = 1.0
+```{julia}
+#| label: fig-forest-diff
+#| fig-cap: "Forest plot of power differences (pp) relative to Fixed at T/R = 1.0."
+fig_fd = Figure(size = (900, 800))
+ax_fd = Axis(fig_fd[1, 1];
+    xlabel = "Δ Power vs Fixed (pp)",
+    title  = "Forest Plot — Power Difference from Fixed (T/R = 1.0)"
+)
+
+forest_diff = sort(filter(r -> r.tr_ratio == 1.0, relative_df), [:method, :n_per_arm])
+n_fd = nrow(forest_diff)
+y_fd = collect(n_fd:-1:1)
+y_fd_labels = ["$(r.method), n=$(r.n_per_arm)" for r in eachrow(forest_diff)]
+
+ax_fd.yticks = (y_fd, y_fd_labels)
+ax_fd.yticklabelsize = 10
+
+for (i, r) in enumerate(eachrow(forest_diff))
+    y = y_fd[i]
+    mc = rel_colors[findfirst(==(r.method), rel_methods)]
+    errorbars!(ax_fd, [r.abs_diff], [y],
+        [r.abs_diff - r.abs_diff_ci_lo], [r.abs_diff_ci_hi - r.abs_diff];
+        direction = :x, color = mc, linewidth = 2, whiskerwidth = 6)
+    scatter!(ax_fd, [r.abs_diff], [y];
+        color = mc, markersize = 10, marker = :circle)
+end
+
+vlines!(ax_fd, [0.0]; color = :black, linestyle = :dash, linewidth = 1.5)
+fig_fd
+```
+
+# Visualization: Forest Plot — Type I Error Differences at T/R = 0.7
+```{julia}
+#| label: fig-forest-diff-t1e
+#| fig-cap: "Forest plot of type I error differences (pp) relative to Fixed at T/R = 0.7."
+fig_fdt = Figure(size = (900, 800))
+ax_fdt = Axis(fig_fdt[1, 1];
+    xlabel = "Δ Type I Error vs Fixed (pp)",
+    title  = "Forest Plot — Type I Error Difference from Fixed (T/R = 0.7)"
+)
+
+forest_diff_t = sort(filter(r -> r.tr_ratio == 0.7, relative_df), [:method, :n_per_arm])
+n_fdt = nrow(forest_diff_t)
+y_fdt = collect(n_fdt:-1:1)
+y_fdt_labels = ["$(r.method), n=$(r.n_per_arm)" for r in eachrow(forest_diff_t)]
+
+ax_fdt.yticks = (y_fdt, y_fdt_labels)
+ax_fdt.yticklabelsize = 10
+
+for (i, r) in enumerate(eachrow(forest_diff_t))
+    y = y_fdt[i]
+    mc = rel_colors[findfirst(==(r.method), rel_methods)]
+    errorbars!(ax_fdt, [r.abs_diff], [y],
+        [r.abs_diff - r.abs_diff_ci_lo], [r.abs_diff_ci_hi - r.abs_diff];
+        direction = :x, color = mc, linewidth = 2, whiskerwidth = 6)
+    scatter!(ax_fdt, [r.abs_diff], [y];
+        color = mc, markersize = 10, marker = :circle)
+end
+
+vlines!(ax_fdt, [0.0]; color = :black, linestyle = :dash, linewidth = 1.5)
+fig_fdt
+```
+
+# Visualization: Ratio Heatmap — Method / Fixed
+
+```{julia}
+#| label: fig-ratio-heatmap
+#| fig-cap: "Heatmap of ratio to Fixed (method / Fixed) by sample size and T/R ratio."
+fig_rh = Figure(size = (1400, 500))
+
+for (idx, m) in enumerate(rel_methods)
+    sub = filter(r -> r.method == m, relative_df)
+    mat_ratio = fill(NaN, length(SAMPLE_SIZES), length(TR_RATIOS))
+
+    for (i, n) in enumerate(SAMPLE_SIZES), (j, tr) in enumerate(TR_RATIOS)
+        r = filter(r -> r.n_per_arm == n && r.tr_ratio == tr, sub)
+        if nrow(r) > 0 && !isnan(r.ratio[1])
+            mat_ratio[i, j] = r.ratio[1]
+        end
+    end
+
+    ax = Axis(fig_rh[1, idx];
+        xlabel = "T/R Ratio",
+        ylabel = idx == 1 ? "Subjects per Arm" : "",
+        title  = "$m / Fixed",
+        xticks = (1:length(TR_RATIOS), string.(TR_RATIOS)),
+        yticks = (1:length(SAMPLE_SIZES), string.(SAMPLE_SIZES))
+    )
+
+    hm = heatmap!(ax, 1:length(TR_RATIOS), 1:length(SAMPLE_SIZES), mat_ratio';
+        colormap = :RdBu, colorrange = (0.8, 1.2)
+    )
+
+    for (i, n) in enumerate(SAMPLE_SIZES), (j, tr) in enumerate(TR_RATIOS)
+        val = mat_ratio[i, j]
+        txt = isnan(val) ? "—" : "$(round(val, digits=2))"
+        text!(ax, j, i; text = txt, align = (:center, :center),
+            fontsize = 9, color = abs(val - 1.0) < 0.1 ? :black : :white)
+    end
+
+    if idx == 3
+        Colorbar(fig_rh[1, idx + 1], hm; label = "Ratio (method / Fixed)")
+    end
+end
+
+Label(fig_rh[0, :], "Ratio to Fixed Method — Heatmap"; fontsize = 18)
+fig_rh
+```

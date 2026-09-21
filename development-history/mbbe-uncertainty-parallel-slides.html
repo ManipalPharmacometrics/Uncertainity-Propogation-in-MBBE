@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Uncertainty Propagation in Model-Based Bioequivalence — Parallel Design</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@4.6.1/dist/reveal.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@4.6.1/dist/theme/white.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@4.6.1/plugin/highlight/monokai.min.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --r-heading-font: 'Inter', sans-serif;
+    --r-main-font: 'Inter', sans-serif;
+    --r-code-font: 'JetBrains Mono', monospace;
+    --r-heading-color: #1a1a2e;
+    --r-main-color: #333;
+    --r-link-color: #0066cc;
+    --accent-blue: #2563eb;
+    --accent-green: #059669;
+    --accent-red: #dc2626;
+    --accent-orange: #d97706;
+    --accent-purple: #7c3aed;
+    --bg-light: #f8fafc;
+  }
+
+  .reveal { font-size: 32px; }
+  .reveal h1 { font-size: 1.8em; font-weight: 700; color: var(--r-heading-color); margin-bottom: 0.4em; }
+  .reveal h2 { font-size: 1.4em; font-weight: 600; color: var(--accent-blue); margin-bottom: 0.3em; }
+  .reveal h3 { font-size: 1.1em; font-weight: 600; color: #555; }
+  .reveal p, .reveal li { font-size: 0.75em; line-height: 1.5; }
+  .reveal ul { margin-left: 0.5em; }
+  .reveal li { margin-bottom: 0.3em; }
+  .reveal code { font-family: var(--r-code-font); font-size: 0.85em; }
+  .reveal pre code { font-size: 0.65em; line-height: 1.4; padding: 1em; border-radius: 8px; }
+
+  /* Title slide */
+  .title-slide { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%) !important; }
+  .title-slide h1 { color: #fff !important; font-size: 1.6em !important; text-shadow: none; }
+  .title-slide h2 { color: #94a3b8 !important; font-weight: 400; font-size: 1.1em !important; }
+  .title-slide p { color: #cbd5e1 !important; font-size: 0.7em !important; }
+  .title-slide .accent { color: #60a5fa; }
+
+  /* Section dividers */
+  .section-slide { background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple)) !important; }
+  .section-slide h1 { color: #fff !important; font-size: 2em !important; }
+  .section-slide h2 { color: rgba(255,255,255,0.8) !important; font-weight: 400; }
+
+  /* Info boxes */
+  .box { padding: 0.7em 1em; border-radius: 10px; margin: 0.5em 0; font-size: 0.72em; }
+  .box-blue { background: #eff6ff; border-left: 4px solid var(--accent-blue); }
+  .box-green { background: #ecfdf5; border-left: 4px solid var(--accent-green); }
+  .box-red { background: #fef2f2; border-left: 4px solid var(--accent-red); }
+  .box-orange { background: #fffbeb; border-left: 4px solid var(--accent-orange); }
+  .box-purple { background: #f5f3ff; border-left: 4px solid var(--accent-purple); }
+  .box-gray { background: #f1f5f9; border-left: 4px solid #94a3b8; }
+
+  /* Tables */
+  .reveal table { font-size: 0.6em; border-collapse: collapse; margin: 0.5em auto; width: auto; }
+  .reveal table th { background: var(--accent-blue); color: #fff; padding: 0.5em 0.8em; font-weight: 600; }
+  .reveal table td { padding: 0.4em 0.8em; border-bottom: 1px solid #e2e8f0; text-align: center; }
+  .reveal table tr:nth-child(even) { background: #f8fafc; }
+  .reveal table .highlight-cell { background: #fef3c7; font-weight: 600; }
+  .reveal table .danger-cell { background: #fee2e2; color: var(--accent-red); font-weight: 600; }
+  .reveal table .good-cell { background: #d1fae5; color: var(--accent-green); font-weight: 600; }
+
+  /* Layout helpers */
+  .two-col { display: flex; gap: 1.5em; align-items: flex-start; }
+  .two-col > div { flex: 1; }
+  .three-col { display: flex; gap: 1em; align-items: flex-start; }
+  .three-col > div { flex: 1; }
+
+  /* Tags / pills */
+  .pill { display: inline-block; padding: 0.15em 0.6em; border-radius: 20px; font-size: 0.65em; font-weight: 600; margin-right: 0.3em; }
+  .pill-blue { background: #dbeafe; color: var(--accent-blue); }
+  .pill-green { background: #d1fae5; color: var(--accent-green); }
+  .pill-red { background: #fee2e2; color: var(--accent-red); }
+  .pill-orange { background: #fef3c7; color: var(--accent-orange); }
+
+  /* Equation styling */
+  .equation { font-size: 0.85em; background: #f8fafc; padding: 0.6em 1em; border-radius: 8px;
+              border: 1px solid #e2e8f0; margin: 0.5em 0; text-align: center; font-family: var(--r-code-font); }
+
+  /* Flow diagrams */
+  .flow { display: flex; align-items: center; justify-content: center; gap: 0.3em; flex-wrap: wrap; margin: 0.5em 0; }
+  .flow-step { background: var(--accent-blue); color: #fff; padding: 0.4em 0.8em; border-radius: 8px;
+               font-size: 0.6em; font-weight: 500; text-align: center; min-width: 100px; }
+  .flow-step.green { background: var(--accent-green); }
+  .flow-step.orange { background: var(--accent-orange); }
+  .flow-step.purple { background: var(--accent-purple); }
+  .flow-step.red { background: var(--accent-red); }
+  .flow-arrow { font-size: 1.2em; color: #94a3b8; }
+
+  /* Footnote */
+  .footnote { font-size: 0.5em; color: #94a3b8; position: absolute; bottom: 1em; left: 2em; right: 2em; }
+
+  /* Emphasis number */
+  .big-number { font-size: 2.5em; font-weight: 700; line-height: 1; }
+  .big-number.blue { color: var(--accent-blue); }
+  .big-number.red { color: var(--accent-red); }
+  .big-number.green { color: var(--accent-green); }
+
+  /* Comparison cards */
+  .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 0.6em; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  .card h3 { margin-top: 0; font-size: 0.8em; }
+  .card p, .card li { font-size: 0.6em; }
+
+  /* Slide numbers */
+  .reveal .slide-number { font-size: 14px; color: #94a3b8; }
+
+  /* Transitions */
+  .reveal .slides section { transition: all 0.3s ease; }
+
+  /* Takeaway banner */
+  .takeaway { background: linear-gradient(135deg, #fef3c7, #fde68a); padding: 0.6em 1em; border-radius: 10px;
+              border: 2px solid #f59e0b; font-size: 0.7em; font-weight: 500; margin-top: 0.5em; }
+</style>
+</head>
+<body>
+<div class="reveal">
+<div class="slides">
+
+<!-- ==================== SLIDE 1: TITLE ==================== -->
+<section class="title-slide" data-background-color="#1a1a2e">
+  <h1>Uncertainty Propagation in<br><span class="accent">Model-Based Bioequivalence</span></h1>
+  <h2>Parallel Design &mdash; A Simulation Study</h2>
+  <br>
+  <p>Built with <strong>Julia / Pumas</strong> &nbsp;|&nbsp; One-Compartment Oral PK Model</p>
+  <p style="margin-top: 1em; font-size: 0.6em !important; color: #64748b;">Use arrow keys or swipe to navigate</p>
+</section>
+
+<!-- ==================== SLIDE 2: AGENDA ==================== -->
+<section>
+  <h1>Agenda</h1>
+  <div class="two-col">
+    <div>
+      <ol style="font-size: 0.75em;">
+        <li><strong>Motivation</strong> &mdash; Why uncertainty matters</li>
+        <li><strong>Study Design</strong> &mdash; PK model &amp; trial setup</li>
+        <li><strong>Uncertainty Methods</strong> &mdash; Fixed, VCOV, Bootstrap, SIR</li>
+        <li><strong>Simulation Engine</strong> &mdash; Virtual BE trials</li>
+      </ol>
+    </div>
+    <div>
+      <ol start="5" style="font-size: 0.75em;">
+        <li><strong>Drug Variability</strong> &mdash; %CV characterization</li>
+        <li><strong>Results</strong> &mdash; Pass rates, power, Type I error</li>
+        <li><strong>Visualizations</strong> &mdash; Heatmaps, CI plots</li>
+        <li><strong>Key Takeaways</strong> &mdash; Regulatory implications</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SECTION: MOTIVATION ==================== -->
+<section class="section-slide" data-background-color="#2563eb">
+  <h1>1</h1>
+  <h2>Motivation &amp; Background</h2>
+</section>
+
+<!-- ==================== SLIDE: What is MBBE ==================== -->
+<section>
+  <h1>What is Model-Based Bioequivalence?</h1>
+  <div class="two-col">
+    <div>
+      <div class="box box-blue">
+        <strong>Traditional BE</strong><br>
+        Conduct a clinical trial &rarr; apply NCA &rarr; compute 90% CI for GMR &rarr; check [0.80, 1.25]
+      </div>
+      <div class="box box-green" style="margin-top: 0.5em;">
+        <strong>Model-Based BE (MBBE)</strong><br>
+        Fit a population PK model &rarr; simulate <em>virtual</em> BE trials &rarr; assess BE on simulated data
+      </div>
+    </div>
+    <div>
+      <h3>Why MBBE?</h3>
+      <ul>
+        <li>Leverage existing PK data (e.g., from Phase I/II)</li>
+        <li>Explore design choices <em>in silico</em></li>
+        <li>Predict probability of BE success</li>
+        <li>Reduce cost and risk of pivotal trials</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE: The Uncertainty Problem ==================== -->
+<section>
+  <h1>The Uncertainty Problem</h1>
+  <div class="flow">
+    <div class="flow-step">Fit PK Model<br>to Data</div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-step orange">Parameter<br>Estimates &theta;&#770;</div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-step purple">Simulate<br>Virtual Trials</div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-step green">Assess<br>BE</div>
+  </div>
+  <br>
+  <div class="box box-red">
+    <strong>Problem:</strong> &theta;&#770; are <em>estimates</em> with uncertainty. If we treat them as fixed truth, our BE predictions may be <strong>overconfident</strong>.
+  </div>
+  <br>
+  <div class="box box-blue">
+    <strong>Question:</strong> How do different methods of propagating parameter uncertainty affect <strong>power</strong> and <strong>Type I error</strong> of MBBE simulations?
+  </div>
+</section>
+
+<!-- ==================== SECTION: STUDY DESIGN ==================== -->
+<section class="section-slide" data-background-color="#2563eb">
+  <h1>2</h1>
+  <h2>Study Design</h2>
+</section>
+
+<!-- ==================== SLIDE: PK Model ==================== -->
+<section>
+  <h1>PK Model</h1>
+  <div class="two-col">
+    <div>
+      <h3>One-Compartment Oral Model</h3>
+      <div class="equation">
+        Depot' = &minus;Ka &middot; Depot<br>
+        Central' = Ka &middot; Depot &minus; (CL/V) &middot; Central
+      </div>
+      <div class="equation" style="margin-top: 0.3em;">
+        C<sub>p</sub> = Central / V<br>
+        DV ~ Normal(C<sub>p</sub>, &sigma;)
+      </div>
+      <p style="font-size: 0.65em; margin-top: 0.5em;">
+        <strong>Bioavailability control:</strong><br>
+        Test: F = tvbio &nbsp;|&nbsp; Reference: F = 1.0<br>
+        &rArr; <strong>AUC<sub>T</sub>/AUC<sub>R</sub> = tvbio</strong> at population level
+      </p>
+    </div>
+    <div>
+      <h3>Inter-Individual Variability</h3>
+      <div class="equation">
+        CL<sub>i</sub> = tvcl &middot; e<sup>&eta;<sub>1</sub></sup><br>
+        V<sub>i</sub> &nbsp;= tvv &middot; e<sup>&eta;<sub>2</sub></sup><br>
+        Ka<sub>i</sub> = tvka &middot; e<sup>&eta;<sub>3</sub></sup>
+      </div>
+      <div class="equation" style="margin-top: 0.3em;">
+        &eta; ~ MVN(0, &Omega;)<br>
+        &Omega; = diag(0.09, 0.09, 0.09)
+      </div>
+      <p style="font-size: 0.65em;">&radic;0.09 = 0.30 &rArr; <strong>~30% CV</strong> on each parameter</p>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE: True Parameters ==================== -->
+<section>
+  <h1>True (Ground Truth) Parameters</h1>
+  <table>
+    <tr><th>Parameter</th><th>Value</th><th>Description</th></tr>
+    <tr><td>tvcl</td><td>5.0</td><td>Typical clearance (L/hr)</td></tr>
+    <tr><td>tvv</td><td>50.0</td><td>Typical volume (L)</td></tr>
+    <tr><td>tvka</td><td>1.2</td><td>Typical absorption rate (1/hr)</td></tr>
+    <tr><td>tvbio</td><td class="good-cell">1.0</td><td>True T/R ratio (true BE)</td></tr>
+    <tr><td>&Omega;</td><td>diag(0.09, 0.09, 0.09)</td><td>IIV (~30% CV)</td></tr>
+    <tr><td>&sigma;</td><td>0.2</td><td>Additive residual error</td></tr>
+  </table>
+  <div class="takeaway" style="margin-top: 0.8em;">
+    The reference trial is simulated with <strong>tvbio = 1.0</strong> (true bioequivalence), then the model is re-estimated using FOCE to obtain &theta;&#770;.
+  </div>
+</section>
+
+<!-- ==================== SLIDE: Trial Design ==================== -->
+<section>
+  <h1>Parallel-Design BE Trial</h1>
+  <div class="two-col">
+    <div>
+      <div class="box box-blue">
+        <strong>Design:</strong> Two independent groups<br>
+        <ul style="margin: 0.3em 0 0 1em; font-size: 0.9em;">
+          <li>Group 1: receives <strong>Reference (R)</strong></li>
+          <li>Group 2: receives <strong>Test (T)</strong></li>
+        </ul>
+      </div>
+      <div class="box box-gray" style="margin-top: 0.5em;">
+        <strong>Dose:</strong> 100 mg oral, single dose<br>
+        <strong>Sampling:</strong> 0&ndash;72 hours (hourly)<br>
+        <strong>Sample sizes explored:</strong> 12, 24, 30, 40, 50, 60, 80 per arm
+      </div>
+    </div>
+    <div>
+      <h3>BE Acceptance Criterion (TOST)</h3>
+      <div class="equation">
+        0.80 &le; 90% CI of GMR &le; 1.25
+      </div>
+      <p style="font-size: 0.65em;">Both AUC <strong>and</strong> C<sub>max</sub> must pass for overall BE.</p>
+      <br>
+      <h3>T/R Ratios Explored</h3>
+      <div style="display: flex; gap: 0.3em; flex-wrap: wrap;">
+        <span class="pill pill-red">0.7</span>
+        <span class="pill pill-orange">0.9</span>
+        <span class="pill pill-green">1.0</span>
+        <span class="pill pill-orange">1.1</span>
+        <span class="pill pill-red">1.3</span>
+      </div>
+      <p style="font-size: 0.6em; color: #888; margin-top: 0.3em;">
+        0.7 &amp; 1.3 = outside BE limits (Type I error)<br>
+        0.9, 1.0, 1.1 = within BE limits (Power)
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SECTION: UNCERTAINTY METHODS ==================== -->
+<section class="section-slide" data-background-color="#2563eb">
+  <h1>3</h1>
+  <h2>Uncertainty Propagation Methods</h2>
+</section>
+
+<!-- ==================== SLIDE: Overview of 4 Methods ==================== -->
+<section>
+  <h1>Four Methods Compared</h1>
+  <div class="three-col" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.8em;">
+    <div class="card">
+      <h3><span class="pill pill-blue">1</span> Fixed (No Uncertainty)</h3>
+      <p>Use point estimates &theta;&#770; directly.<br>No variability in parameters across simulations.</p>
+      <p><strong>Cost:</strong> None &nbsp; <strong>Baseline comparator</strong></p>
+    </div>
+    <div class="card">
+      <h3><span class="pill pill-green">2</span> VCOV (Asymptotic Normal)</h3>
+      <p>Sample from multivariate normal using the variance-covariance matrix from FOCE fit.</p>
+      <p><strong>Cost:</strong> Minimal (matrix inversion at MLE)</p>
+    </div>
+    <div class="card">
+      <h3><span class="pill pill-orange">3</span> Bootstrap</h3>
+      <p>Resample data &rarr; re-fit model 100 times &rarr; sample from bootstrap covariance.</p>
+      <p><strong>Cost:</strong> High (100 re-fits)</p>
+    </div>
+    <div class="card">
+      <h3><span class="pill pill-red">4</span> SIR (Sampling Importance Resampling)</h3>
+      <p>Evaluate likelihood at many candidates &rarr; resample by importance weights.</p>
+      <p><strong>Cost:</strong> Moderate (no re-fitting)</p>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE: Sampling Mechanism ==================== -->
+<section>
+  <h1>How Parameters Are Sampled</h1>
+  <div class="box box-purple">
+    <strong>All methods use the same sampling helper</strong> (for VCOV, Bootstrap, SIR):
+  </div>
+  <br>
+  <div class="equation" style="font-size: 0.8em;">
+    1. Form &mu; = log(&theta;&#770;) &nbsp;&nbsp; <span style="color: #888;">(log of all point estimates)</span><br><br>
+    2. Draw &theta;* ~ exp( MVN(&mu;, V) ) &nbsp;&nbsp; <span style="color: #888;">(sample on log scale, exponentiate back)</span>
+  </div>
+  <br>
+  <div class="two-col">
+    <div class="box box-green">
+      <strong>Why log scale?</strong><br>
+      All PK parameters (CL, V, Ka, &Omega;, &sigma;) are strictly positive. Sampling on the log scale and exponentiating back guarantees positivity.
+    </div>
+    <div class="box box-blue">
+      <strong>Each method differs in V:</strong><br>
+      &bull; VCOV: V = asymptotic covariance<br>
+      &bull; Bootstrap: V = bootstrap covariance<br>
+      &bull; SIR: V = SIR-derived covariance<br>
+      All generate <strong>200 parameter sets</strong>.
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SECTION: SIMULATION ENGINE ==================== -->
+<section class="section-slide" data-background-color="#2563eb">
+  <h1>4</h1>
+  <h2>Virtual BE Simulation Engine</h2>
+</section>
+
+<!-- ==================== SLIDE: Engine Overview ==================== -->
+<section>
+  <h1>Simulation Workflow</h1>
+  <p style="font-size: 0.65em; color: #888;">For each (method &times; sample size &times; T/R ratio) combination:</p>
+  <div class="flow" style="margin: 0.8em 0;">
+    <div class="flow-step">Draw &theta;*<br>from uncertainty<br>samples</div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-step orange">Override tvbio<br>with target<br>T/R ratio</div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-step purple">Simulate<br>full BE<br>trial</div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-step green">Run NCA<br>&amp; compute<br>90% CI</div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-step red">Record<br>Pass /<br>Fail</div>
+  </div>
+  <br>
+  <div class="box box-gray">
+    <strong>Simulation grid:</strong>
+    4 methods &times; 7 sample sizes &times; 5 T/R ratios &times; <strong>200 simulations</strong> = 28,000 virtual trials
+  </div>
+  <br>
+  <div class="takeaway">
+    <strong>Key mechanism:</strong> In Fixed method, &theta;* = &theta;&#770; every time. In uncertainty methods, each simulation draws a <em>different</em> &theta;*, propagating estimation uncertainty into the BE assessment.
+  </div>
+</section>
+
+<!-- ==================== SLIDE: What is measured ==================== -->
+<section>
+  <h1>Metrics</h1>
+  <div class="two-col">
+    <div>
+      <h2>Power</h2>
+      <div class="box box-green">
+        <strong>Definition:</strong> BE pass rate when the true T/R ratio is <em>within</em> the BE limits.<br><br>
+        Measured at T/R &isin; {0.9, 1.0, 1.1}<br><br>
+        <strong>Goal:</strong> Should be high (&ge; 80%)
+      </div>
+    </div>
+    <div>
+      <h2>Type I Error</h2>
+      <div class="box box-red">
+        <strong>Definition:</strong> BE pass rate when the true T/R ratio is <em>outside</em> the BE limits.<br><br>
+        Measured at T/R &isin; {0.7, 1.3}<br><br>
+        <strong>Goal:</strong> Should be controlled (&le; 5%)
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SECTION: DRUG VARIABILITY ==================== -->
+<section class="section-slide" data-background-color="#2563eb">
+  <h1>5</h1>
+  <h2>Drug Variability Characterization</h2>
+</section>
+
+<!-- ==================== SLIDE: %CV ==================== -->
+<section>
+  <h1>Between-Subject %CV</h1>
+  <p style="font-size: 0.7em;">Estimated via NCA from 100 simulated parallel-design trials (60 subjects/arm, T/R = 1.0)</p>
+  <br>
+  <div class="two-col" style="justify-content: center;">
+    <div style="text-align: center;">
+      <div class="big-number blue">24.4%</div>
+      <p style="font-size: 0.8em;">AUC %CV</p>
+    </div>
+    <div style="text-align: center;">
+      <div class="big-number blue">20.7%</div>
+      <p style="font-size: 0.8em;">C<sub>max</sub> %CV</p>
+    </div>
+  </div>
+  <br>
+  <div class="takeaway">
+    This represents a drug with <strong>moderate variability</strong> &mdash; typical of many orally administered drugs. Not a highly variable drug (HVD), where %CV &gt; 30%.
+  </div>
+</section>
+
+<!-- ==================== SECTION: RESULTS ==================== -->
+<section class="section-slide" data-background-color="#2563eb">
+  <h1>6</h1>
+  <h2>Results</h2>
+</section>
+
+<!-- ==================== SLIDE: Pass Rate Table n=24 ==================== -->
+<section>
+  <h1>BE Pass Rate (%) &mdash; 24 Subjects/Arm</h1>
+  <table>
+    <tr><th>T/R Ratio</th><th>Fixed</th><th>VCOV</th><th>Bootstrap</th><th>SIR</th></tr>
+    <tr>
+      <td><span class="pill pill-red">0.7</span></td>
+      <td class="good-cell">0.0</td><td class="danger-cell">13.0</td><td class="danger-cell">8.0</td><td class="danger-cell">14.5</td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-orange">0.9</span></td>
+      <td>39.5</td><td>35.0</td><td>33.0</td><td>32.0</td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-green">1.0</span></td>
+      <td class="highlight-cell">59.0</td><td>47.0</td><td>56.5</td><td>38.0</td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-orange">1.1</span></td>
+      <td>42.0</td><td>37.0</td><td>39.0</td><td>39.5</td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-red">1.3</span></td>
+      <td class="good-cell">1.0</td><td class="danger-cell">15.5</td><td class="danger-cell">11.5</td><td class="danger-cell">12.5</td>
+    </tr>
+  </table>
+  <div class="box box-orange" style="margin-top: 0.5em;">
+    <strong>Observation:</strong> Fixed has the highest power at T/R=1.0 but well-controlled Type I error. Uncertainty methods show <strong>dramatically inflated Type I error</strong> (8&ndash;15% vs 0&ndash;1%).
+  </div>
+</section>
+
+<!-- ==================== SLIDE: Pass Rate Table n=30 ==================== -->
+<section>
+  <h1>BE Pass Rate (%) &mdash; 30 Subjects/Arm</h1>
+  <table>
+    <tr><th>T/R Ratio</th><th>Fixed</th><th>VCOV</th><th>Bootstrap</th><th>SIR</th></tr>
+    <tr>
+      <td><span class="pill pill-red">0.7</span></td>
+      <td class="good-cell">0.0</td><td class="danger-cell">17.0</td><td class="danger-cell">11.5</td><td class="danger-cell">15.5</td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-orange">0.9</span></td>
+      <td>55.5</td><td>50.5</td><td>41.5</td><td>46.5</td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-green">1.0</span></td>
+      <td class="highlight-cell">75.5</td><td>66.5</td><td>63.5</td><td>61.0</td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-orange">1.1</span></td>
+      <td>58.5</td><td>48.5</td><td>52.0</td><td>42.0</td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-red">1.3</span></td>
+      <td class="good-cell">1.0</td><td class="danger-cell">15.0</td><td class="danger-cell">15.5</td><td class="danger-cell">13.5</td>
+    </tr>
+  </table>
+  <div class="box box-blue" style="margin-top: 0.5em;">
+    Same pattern at n=30: Fixed peaks at 75.5% power; uncertainty methods range 61&ndash;67%. Type I error: Fixed &le;1% vs uncertainty 11&ndash;17%.
+  </div>
+</section>
+
+<!-- ==================== SLIDE: Pass Rate Table n=60 ==================== -->
+<section>
+  <h1>BE Pass Rate (%) &mdash; 60 Subjects/Arm</h1>
+  <table>
+    <tr><th>T/R Ratio</th><th>Fixed</th><th>VCOV</th><th>Bootstrap</th><th>SIR</th></tr>
+    <tr>
+      <td><span class="pill pill-red">0.7</span></td>
+      <td class="good-cell">0.0</td><td class="danger-cell">19.0</td><td class="danger-cell">19.0</td><td class="danger-cell">22.0</td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-orange">0.9</span></td>
+      <td>86.5</td><td>76.0</td><td>79.5</td><td>79.0</td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-green">1.0</span></td>
+      <td class="highlight-cell">98.5</td><td>93.0</td><td>90.0</td><td>91.5</td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-orange">1.1</span></td>
+      <td>87.5</td><td>78.5</td><td>85.0</td><td>77.0</td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-red">1.3</span></td>
+      <td class="good-cell">1.5</td><td class="danger-cell">20.0</td><td class="danger-cell">16.5</td><td class="danger-cell">21.0</td>
+    </tr>
+  </table>
+  <div class="box box-red" style="margin-top: 0.5em;">
+    Even at n=60, uncertainty methods show Type I error of <strong>16&ndash;22%</strong> &mdash; far above the 5% nominal level.
+  </div>
+</section>
+
+<!-- ==================== SLIDE: Power by Sample Size ==================== -->
+<section>
+  <h1>Power by Sample Size</h1>
+  <p style="font-size: 0.65em; color: #888;">Mean power (%) across T/R &isin; {0.9, 1.0, 1.1}</p>
+  <table>
+    <tr><th>n/arm</th><th>Fixed</th><th>VCOV</th><th>Bootstrap</th><th>SIR</th></tr>
+    <tr><td>12</td><td>6.2</td><td>11.0</td><td>9.0</td><td>11.1</td></tr>
+    <tr><td>24</td><td>46.8</td><td>39.7</td><td>42.8</td><td>36.5</td></tr>
+    <tr><td>30</td><td>63.2</td><td>55.2</td><td>52.3</td><td>49.8</td></tr>
+    <tr><td class="highlight-cell">40</td><td class="highlight-cell">78.5</td><td>64.3</td><td>68.8</td><td>63.3</td></tr>
+    <tr><td>50</td><td class="good-cell">87.8</td><td>76.3</td><td class="highlight-cell">80.3</td><td>73.3</td></tr>
+    <tr><td>60</td><td class="good-cell">90.8</td><td class="highlight-cell">82.5</td><td class="good-cell">84.8</td><td class="highlight-cell">82.5</td></tr>
+    <tr><td>80</td><td class="good-cell">97.2</td><td class="good-cell">91.2</td><td class="good-cell">93.2</td><td class="good-cell">88.3</td></tr>
+  </table>
+  <div class="takeaway">
+    Fixed reaches 80% power at ~40/arm. With uncertainty, you need <strong>~50&ndash;60 subjects/arm</strong>: a 5&ndash;15 percentage-point power penalty.
+  </div>
+</section>
+
+<!-- ==================== SLIDE: Type I Error ==================== -->
+<section>
+  <h1>Type I Error by Sample Size</h1>
+  <p style="font-size: 0.65em; color: #888;">Mean Type I error (%) across T/R &isin; {0.7, 1.3}</p>
+  <table>
+    <tr><th>n/arm</th><th>Fixed</th><th>VCOV</th><th>Bootstrap</th><th>SIR</th></tr>
+    <tr><td>12</td><td class="good-cell">0.25</td><td class="danger-cell">5.3</td><td>3.5</td><td class="danger-cell">4.8</td></tr>
+    <tr><td>24</td><td class="good-cell">0.5</td><td class="danger-cell">14.3</td><td class="danger-cell">9.8</td><td class="danger-cell">13.5</td></tr>
+    <tr><td>30</td><td class="good-cell">0.5</td><td class="danger-cell">16.0</td><td class="danger-cell">13.5</td><td class="danger-cell">14.5</td></tr>
+    <tr><td>40</td><td class="good-cell">1.0</td><td class="danger-cell">19.5</td><td class="danger-cell">16.0</td><td class="danger-cell">14.0</td></tr>
+    <tr><td>50</td><td class="good-cell">0.75</td><td class="danger-cell">15.0</td><td class="danger-cell">17.3</td><td class="danger-cell">21.3</td></tr>
+    <tr><td>60</td><td class="good-cell">0.75</td><td class="danger-cell">19.5</td><td class="danger-cell">17.8</td><td class="danger-cell">21.5</td></tr>
+    <tr><td>80</td><td class="good-cell">0.75</td><td class="danger-cell">20.0</td><td class="danger-cell">20.0</td><td class="danger-cell">20.3</td></tr>
+  </table>
+  <div class="box box-red">
+    <strong>Critical finding:</strong> All uncertainty methods inflate Type I error to <strong>15&ndash;21%</strong> (vs nominal 5%). Fixed stays below 1%.
+  </div>
+</section>
+
+<!-- ==================== SLIDE: Type I Error Explained ==================== -->
+<section>
+  <h1>Why Is Type I Error Inflated?</h1>
+  <div class="flow" style="margin: 0.5em 0;">
+    <div class="flow-step">True T/R = 0.7<br>(NOT bioequivalent)</div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-step orange">Draw &theta;*<br>from uncertainty<br>distribution</div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-step red">Some draws shift<br>PK profiles enough<br>to mimic BE</div>
+    <div class="flow-arrow">&rarr;</div>
+    <div class="flow-step red">False positive<br>BE conclusion</div>
+  </div>
+  <br>
+  <div class="two-col">
+    <div class="box box-orange">
+      <strong>Mechanism:</strong> Uncertain parameters occasionally produce simulated trials where the <em>apparent</em> T/R ratio shifts toward 1.0, even though the <em>true</em> T/R is 0.7 or 1.3.
+    </div>
+    <div class="box box-red">
+      <strong>Counterintuitive:</strong> Type I error <em>increases</em> with sample size for uncertainty methods, because larger trials have more powerful TOST tests that are more likely to declare BE when parameters are favorably drawn.
+    </div>
+  </div>
+  <br>
+  <div class="takeaway">
+    This is a <strong>serious regulatory concern</strong> &mdash; uncertainty propagation as implemented here could lead to approving non-bioequivalent products.
+  </div>
+</section>
+
+<!-- ==================== SECTION: VISUALIZATIONS ==================== -->
+<section class="section-slide" data-background-color="#2563eb">
+  <h1>7</h1>
+  <h2>Key Visualizations</h2>
+</section>
+
+<!-- ==================== SLIDE: Viz overview ==================== -->
+<section>
+  <h1>Visualization Gallery</h1>
+  <p style="font-size: 0.7em;">The full analysis includes 9 interactive figures generated with CairoMakie:</p>
+  <br>
+  <div class="three-col" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.6em;">
+    <div class="card">
+      <h3>1. Pass Rate Curves</h3>
+      <p>Pass rate vs T/R ratio by sample size, one panel per method</p>
+    </div>
+    <div class="card">
+      <h3>2. Heatmaps</h3>
+      <p>Sample size vs T/R ratio colored by pass rate</p>
+    </div>
+    <div class="card">
+      <h3>3. Power Curves</h3>
+      <p>Power vs sample size for each method</p>
+    </div>
+    <div class="card">
+      <h3>4&ndash;5. GMR Histograms</h3>
+      <p>Distribution of AUC and C<sub>max</sub> GMR by T/R ratio</p>
+    </div>
+    <div class="card">
+      <h3>6. CI Bounds</h3>
+      <p>90% CI lower/upper bound distributions</p>
+    </div>
+    <div class="card">
+      <h3>7. CI Width vs n</h3>
+      <p>CI narrows with increasing sample size</p>
+    </div>
+    <div class="card">
+      <h3>8. Method Comparison</h3>
+      <p>Head-to-head pass rate at n=30</p>
+    </div>
+    <div class="card">
+      <h3>9. Type I Error</h3>
+      <p>Type I error vs sample size by method</p>
+    </div>
+  </div>
+  <p class="footnote">See the full HTML report for interactive figures.</p>
+</section>
+
+<!-- ==================== SLIDE: Pass Rate Curves Description ==================== -->
+<section>
+  <h1>Pass Rate Curves</h1>
+  <div class="box box-blue" style="font-size: 0.7em;">
+    <strong>Figure 1: BE Pass Rate by T/R Ratio and Sample Size</strong><br>
+    2&times;2 grid &mdash; one panel per method (Fixed, VCOV, Bootstrap, SIR)
+  </div>
+  <br>
+  <div class="two-col">
+    <div>
+      <h3>What to look for</h3>
+      <ul>
+        <li>Inverted-U shape peaking at T/R = 1.0</li>
+        <li>Tails at 0.7 and 1.3 should be near zero</li>
+        <li>Fixed method: tails are near 0% &check;</li>
+        <li>Uncertainty methods: tails are elevated &cross;</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Reference lines</h3>
+      <ul>
+        <li><span style="color: red;">&mdash; &mdash;</span> Red dashed: 5% alpha level</li>
+        <li><span style="color: gray;">&#8942;</span> Gray dotted: BE limits (0.80, 1.25)</li>
+      </ul>
+      <br>
+      <p style="font-size: 0.65em;">Sample sizes shown as separate colored curves (n=12 thin to n=80 bold), illustrating how power grows with sample size.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE: Heatmap Description ==================== -->
+<section>
+  <h1>Pass Rate Heatmaps</h1>
+  <div class="box box-green" style="font-size: 0.7em;">
+    <strong>Figure 2: BE Pass Rate Heatmap &mdash; Sample Size vs T/R Ratio</strong><br>
+    2&times;2 grid, one per method. Color: Red (0%) &rarr; Yellow (50%) &rarr; Green (100%).
+  </div>
+  <br>
+  <div class="two-col">
+    <div>
+      <h3>Fixed Method (ideal)</h3>
+      <ul>
+        <li>Clear green band at T/R = 0.9&ndash;1.1 for large n</li>
+        <li>Red at T/R = 0.7 and 1.3 (near 0%)</li>
+        <li>Clean separation between BE and non-BE regions</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Uncertainty Methods</h3>
+      <ul>
+        <li>Green band is slightly narrower and paler</li>
+        <li>T/R = 0.7 and 1.3 show yellow/orange instead of red</li>
+        <li><strong>"Blurred" boundary</strong> between BE and non-BE</li>
+      </ul>
+    </div>
+  </div>
+  <div class="takeaway" style="margin-top: 0.5em;">
+    Uncertainty propagation creates a <strong>"fuzzy" decision boundary</strong> &mdash; the heatmap visually shows how parameter uncertainty erodes the clean separation between pass and fail regions.
+  </div>
+</section>
+
+<!-- ==================== SLIDE: Power Curves Description ==================== -->
+<section>
+  <h1>Power Curves by Sample Size</h1>
+  <div class="box box-purple" style="font-size: 0.7em;">
+    <strong>Figure 3:</strong> Single panel &mdash; Mean power vs subjects per arm, one line per method.
+  </div>
+  <br>
+  <div class="two-col">
+    <div>
+      <table style="font-size: 0.55em;">
+        <tr><th>Method</th><th>Color</th><th>n for 80% power</th></tr>
+        <tr><td>Fixed</td><td style="color: steelblue;">&#9679; steelblue</td><td>~40/arm</td></tr>
+        <tr><td>VCOV</td><td style="color: crimson;">&#9670; crimson</td><td>~60/arm</td></tr>
+        <tr><td>Bootstrap</td><td style="color: seagreen;">&#9650; seagreen</td><td>~50/arm</td></tr>
+        <tr><td>SIR</td><td style="color: darkorange;">&#9632; darkorange</td><td>~60/arm</td></tr>
+      </table>
+    </div>
+    <div>
+      <div class="box box-orange">
+        <strong>The "uncertainty tax":</strong><br>
+        Accounting for parameter uncertainty costs an additional <strong>10&ndash;20 subjects per arm</strong> to achieve the same power.
+      </div>
+    </div>
+  </div>
+  <p style="font-size: 0.6em; color: #888; margin-top: 0.5em;">Horizontal dashed line at 80% marks the conventional power target.</p>
+</section>
+
+<!-- ==================== SLIDE: CI Width ==================== -->
+<section>
+  <h1>CI Width Narrows with Sample Size</h1>
+  <div class="box box-blue" style="font-size: 0.7em;">
+    <strong>Figure 7:</strong> Median AUC GMR with shaded 90% CI band vs sample size (Fixed, T/R=1.0)
+  </div>
+  <br>
+  <div style="text-align: center;">
+    <div style="display: inline-block; text-align: left;">
+      <table style="font-size: 0.55em;">
+        <tr><th>n/arm</th><th>Approx CI Width</th><th>Fits in [0.80, 1.25]?</th></tr>
+        <tr><td>12</td><td>Very wide</td><td class="danger-cell">Often no</td></tr>
+        <tr><td>24</td><td>Wide</td><td class="highlight-cell">Sometimes</td></tr>
+        <tr><td>40</td><td>Moderate</td><td class="highlight-cell">Usually</td></tr>
+        <tr><td>60</td><td>Narrow</td><td class="good-cell">Almost always</td></tr>
+        <tr><td>80</td><td>Very narrow</td><td class="good-cell">Yes</td></tr>
+      </table>
+    </div>
+  </div>
+  <br>
+  <div class="takeaway">
+    This is the fundamental sample-size tradeoff: larger n &rarr; tighter CI &rarr; higher probability of fitting within [0.80, 1.25] when the true ratio is near 1.0.
+  </div>
+</section>
+
+<!-- ==================== SECTION: TAKEAWAYS ==================== -->
+<section class="section-slide" data-background-color="#2563eb">
+  <h1>8</h1>
+  <h2>Key Takeaways</h2>
+</section>
+
+<!-- ==================== SLIDE: Summary of Findings ==================== -->
+<section>
+  <h1>Summary of Findings</h1>
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.8em;">
+    <div class="box box-green">
+      <strong>1. Fixed method</strong><br>
+      Highest power, well-controlled Type I error (&lt;1%). But <strong>overconfident</strong> &mdash; ignores real-world uncertainty.
+    </div>
+    <div class="box box-orange">
+      <strong>2. Power penalty</strong><br>
+      Uncertainty propagation costs <strong>5&ndash;15 percentage points</strong> of power, requiring 10&ndash;20 extra subjects per arm.
+    </div>
+    <div class="box box-red">
+      <strong>3. Inflated Type I error</strong><br>
+      All uncertainty methods show <strong>15&ndash;21% Type I error</strong> at larger sample sizes &mdash; far above the 5% nominal level.
+    </div>
+    <div class="box box-blue">
+      <strong>4. Methods are similar</strong><br>
+      VCOV, Bootstrap, and SIR yield broadly comparable results. VCOV is the cheapest computationally.
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE: The Dilemma ==================== -->
+<section>
+  <h1>The Uncertainty Dilemma</h1>
+  <br>
+  <div class="two-col" style="align-items: stretch;">
+    <div style="text-align: center; padding: 1em; background: #ecfdf5; border-radius: 12px; border: 2px solid var(--accent-green);">
+      <div class="big-number green" style="font-size: 1.5em;">Ignore</div>
+      <p style="font-size: 0.7em; margin-top: 0.5em;">
+        uncertainty<br>
+        <strong>Pro:</strong> Controlled Type I error<br>
+        <strong>Con:</strong> Optimistic power estimates
+      </p>
+    </div>
+    <div style="text-align: center; padding: 1em; background: #fef2f2; border-radius: 12px; border: 2px solid var(--accent-red);">
+      <div class="big-number red" style="font-size: 1.5em;">Propagate</div>
+      <p style="font-size: 0.7em; margin-top: 0.5em;">
+        uncertainty<br>
+        <strong>Pro:</strong> More realistic simulations<br>
+        <strong>Con:</strong> Inflated Type I error (up to 21%)
+      </p>
+    </div>
+  </div>
+  <br>
+  <div class="box box-purple">
+    <strong>Implication:</strong> Neither approach is fully satisfactory. The field needs methods that propagate uncertainty while maintaining Type I error control &mdash; potentially through calibration, restricted sampling, or alternative uncertainty frameworks.
+  </div>
+</section>
+
+<!-- ==================== SLIDE: Regulatory Implications ==================== -->
+<section>
+  <h1>Regulatory Implications</h1>
+  <div class="box box-red" style="font-size: 0.75em;">
+    <strong>Type I error inflation is the most critical finding.</strong><br>
+    If an uncertainty-propagated MBBE simulation suggests a product is bioequivalent, there is up to a ~20% chance this conclusion is <em>wrong</em> when the true T/R ratio is outside [0.80, 1.25].
+  </div>
+  <br>
+  <h3>Recommendations</h3>
+  <ul>
+    <li><strong>For sponsors:</strong> Report both Fixed and uncertainty-propagated results to bracket the true operating characteristics</li>
+    <li><strong>For regulators:</strong> Be cautious interpreting MBBE results with uncertainty propagation &mdash; consider requiring calibration studies</li>
+    <li><strong>For methodologists:</strong> Develop approaches that decouple uncertainty propagation from Type I error inflation</li>
+    <li><strong>Sample sizing:</strong> Plan for <strong>50&ndash;60 subjects per arm</strong> in parallel designs to ensure adequate power even with uncertainty</li>
+  </ul>
+</section>
+
+<!-- ==================== SLIDE: Technical Summary ==================== -->
+<section>
+  <h1>Technical Summary</h1>
+  <table style="font-size: 0.55em;">
+    <tr><th>Aspect</th><th>Detail</th></tr>
+    <tr><td>Software</td><td>Julia + Pumas + Bioequivalence + CairoMakie</td></tr>
+    <tr><td>PK Model</td><td>1-compartment oral, first-order absorption, additive error</td></tr>
+    <tr><td>Trial Design</td><td>Parallel (two independent groups)</td></tr>
+    <tr><td>Estimation</td><td>FOCE (First-Order Conditional Estimation)</td></tr>
+    <tr><td>Uncertainty Methods</td><td>Fixed, VCOV (asymptotic), Bootstrap (100 resamples), SIR (200/100)</td></tr>
+    <tr><td>BE Criterion</td><td>TOST: 90% CI of GMR within [0.80, 1.25] for both AUC and C<sub>max</sub></td></tr>
+    <tr><td>Sample Sizes</td><td>12, 24, 30, 40, 50, 60, 80 subjects per arm</td></tr>
+    <tr><td>T/R Ratios</td><td>0.7, 0.9, 1.0, 1.1, 1.3</td></tr>
+    <tr><td>Simulations</td><td>200 per cell &times; 140 cells = 28,000 virtual trials</td></tr>
+    <tr><td>Drug Variability</td><td>AUC %CV = 24.4%, C<sub>max</sub> %CV = 20.7% (moderate)</td></tr>
+  </table>
+</section>
+
+<!-- ==================== SLIDE: Thank You ==================== -->
+<section class="title-slide" data-background-color="#1a1a2e">
+  <h1>Thank You</h1>
+  <h2 style="font-size: 0.9em !important;">Uncertainty Propagation in MBBE &mdash; Parallel Design</h2>
+  <br>
+  <p style="color: #94a3b8 !important; font-size: 0.65em !important;">
+    Full analysis and interactive figures available in<br>
+    <code style="color: #60a5fa;">mbbe-uncertainity-v2-parallel.html</code>
+  </p>
+  <br>
+  <p style="color: #64748b !important; font-size: 0.55em !important;">
+    Built with Julia / Pumas &nbsp;|&nbsp; Quarto &nbsp;|&nbsp; Reveal.js
+  </p>
+</section>
+
+</div><!-- /slides -->
+</div><!-- /reveal -->
+
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@4.6.1/dist/reveal.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@4.6.1/plugin/highlight/highlight.min.js"></script>
+<script>
+Reveal.initialize({
+  hash: true,
+  slideNumber: 'c/t',
+  width: 1200,
+  height: 700,
+  margin: 0.08,
+  transition: 'slide',
+  transitionSpeed: 'default',
+  plugins: [ RevealHighlight ],
+  pdfSeparateFragments: false,
+});
+</script>
+</body>
+</html>
