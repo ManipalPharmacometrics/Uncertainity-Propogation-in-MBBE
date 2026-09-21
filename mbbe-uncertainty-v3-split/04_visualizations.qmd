@@ -36,7 +36,11 @@ re-run — only plotting from saved `.jls` files.
 #| output: false
 include(joinpath(@__DIR__, "common.jl"))
 
-const RESULTS_DIR = "/home/jrun/data/code/teva-olanzapine/mbbe-uncertainty-v3-split"
+# Resolve results next to this document rather than at an absolute path. The
+# previous value pointed at /home/jrun/data/code/teva-olanzapine/..., which is
+# both machine-specific and a DIFFERENT project directory from the one these
+# files live in, so neither report could render anywhere but one machine.
+const RESULTS_DIR = @__DIR__
 results = load_all_method_results(dir = RESULTS_DIR)
 all_batches  = results.all_batches
 all_summary  = results.all_summary
