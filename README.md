@@ -2,6 +2,13 @@
 
 A simulation framework for comparing how different parameter uncertainty methods affect the operating characteristics (power, Type I error) of model-based bioequivalence (MBBE) studies using a parallel-group design.
 
+
+> **2026-09-28 — sampler bug fixed.** `sample_from_vcov` in `mbbe-uncertainty-v3-split/common.jl` used the
+> natural-scale covariance from Pumas as a log-scale covariance. The VCOV, Bootstrap and SIR results stored in
+> `batches_*.jls` and `runs/` (10–23% false acceptance, 13–16 pp power loss) are artefacts of that bug and
+> should not be used. The fix and the corrected re-run are in
+> [`mbbe-uncertainty-v3-split/rerun-corrected/`](mbbe-uncertainty-v3-split/rerun-corrected/README.md).
+
 ## Background
 
 In MBBE, a pharmacokinetic (PK) model is fitted to clinical data, and the estimated parameters are used to simulate virtual bioequivalence trials. A key question is: **how should uncertainty in the estimated parameters be propagated into these simulations?**

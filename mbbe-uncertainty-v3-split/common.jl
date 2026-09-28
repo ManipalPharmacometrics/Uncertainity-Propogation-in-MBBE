@@ -123,16 +123,18 @@ end
 """
 Sample `n` parameter NamedTuples from a MvNormal on the estimation (log) scale.
 """
-function sample_from_vcov(mean_params, V, n)
-    μ = [
-        log(mean_params.tvcl), log(mean_params.tvv),
-        log(mean_params.tvka), log(mean_params.tvbio),
-        log(mean_params.Ω[1,1]), log(mean_params.Ω[2,2]), log(mean_params.Ω[3,3]),
-        log(mean_params.σ)
-    ]
-    dist = MvNormal(μ, Symmetric(V))
+# `V` is vcov(fit) / vcov(inferred), which Pumas reports on the NATURAL scale of the
+# parameters. Sampling is on the log scale, so V is transformed first by the delta
+# method, Cov(log θ) ≈ D⁻¹ V D⁻¹ with D = diag(θ̂). (Before 2026-09-28 V was used as
+# a log-scale covariance directly: log-SD(V) was 2.1 instead of 0.04, drawn V spanned
+# ~1–2,100 L, and trials fell under the additive error floor and passed at T/R 0.7.)
+function sample_from_vcov(mean_params, V, n; rng = Random.default_rng())
+    θ = [mean_params.tvcl, mean_params.tvv, mean_params.tvka, mean_params.tvbio,
+         mean_params.Ω[1,1], mean_params.Ω[2,2], mean_params.Ω[3,3], mean_params.σ]
+    Dinv = Diagonal(1 ./ θ)
+    dist = MvNormal(log.(θ), Symmetric(Matrix(Dinv * V * Dinv)))   # natural -> log scale
     return [begin
-        s = rand(dist)
+        s = rand(rng, dist)
         (tvcl  = exp(s[1]), tvv  = exp(s[2]),
          tvka  = exp(s[3]), tvbio = exp(s[4]),
          Ω     = Diagonal([exp(s[5]), exp(s[6]), exp(s[7])]),

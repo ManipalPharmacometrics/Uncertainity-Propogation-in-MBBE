@@ -1,0 +1,244 @@
+WARNING: using Makie.Categorical in module Main conflicts with an existing identifier.
+θ̂ = (tvcl = 5.0585682725394605, tvv = 51.36620030585912, tvka = 1.1651899382530528, tvbio = 0.9602665207562151, Ω = [0.13718070568440033 0.0 0.0; 0.0 0.05771824910947612 0.0; 0.0 0.0 0.13328883506643377], σ = 0.20057901393823366)
+VCOV done
+Bootstrap: 500 usable fits, 50.9 min
+┌ Warning: Variable `cp` is defined in the `@derived` block using `=` and hence `cp` is not used for model fitting but only returned when simulating:
+│ If `cp` is a random variable, it must be defined in the `@derived` block using `~`;
+│ if `cp` should be returned when simulating, it should be defined in the `@observed` block using `=`;
+│ if `cp` is an intermediate quantity that should not be returned when simulating, it should be defined using `:=`.
+└ @ Pumas /build/run/_work/PumasSystemImages/PumasSystemImages/julia_depot/packages/Pumas/GZeMg/src/dsl/model_macro.jl:2351
+[ Info: Checking the initial parameter values.
+[ Info: The initial negative log likelihood and its gradient are finite. Check passed.
+[ Info: Bootstrap inference finished.
+[ Info: Calculating: variance-covariance matrix.
+[ Info: Done.
+ERROR: LoadError: BoundsError: attempt to access 1-element Vector{Vector{@NamedTuple{tvcl::Float64, tvv::Float64, tvka::Float64, tvbio::Float64, Ω::PDMats.PDiagMat{Float64, Vector{Float64}}, σ::Float64}}} at index [[1446, 1732, 87, 206, 905, 1184, 707, 642, 1357, 1250  …  877, 1389, 1902, 76, 511, 1212, 1767, 44, 431, 1397]]
+Stacktrace:
+ [1] throw_boundserror(A::Vector{Vector{@NamedTuple{tvcl::Float64, tvv::Float64, tvka::Float64, tvbio::Float64, Ω::PDMats.PDiagMat{Float64, Vector{Float64}}, σ::Float64}}}, I::Tuple{Vector{Int64}})
+   @ Base ./essentials.jl:14
+ [2] checkbounds
+   @ ./abstractarray.jl:699 [inlined]
+ [3] _getindex
+   @ ./multidimensional.jl:914 [inlined]
+ [4] getindex(A::Vector{Vector{@NamedTuple{tvcl::Float64, tvv::Float64, tvka::Float64, tvbio::Float64, Ω::PDMats.PDiagMat{Float64, Vector{Float64}}, σ::Float64}}}, I::Vector{Int64})
+   @ Base ./abstractarray.jl:1312
+ [5] top-level scope
+   @ /mnt/data/code/learning/publication/paper1-uncertainty-propagation/rerun/01_uncertainty.jl:27
+in expression starting at /mnt/data/code/learning/publication/paper1-uncertainty-propagation/rerun/01_uncertainty.jl:27
+WARNING: using Makie.Categorical in module Main conflicts with an existing identifier.
+┌ Warning: Variable `cp` is defined in the `@derived` block using `=` and hence `cp` is not used for model fitting but only returned when simulating:
+│ If `cp` is a random variable, it must be defined in the `@derived` block using `~`;
+│ if `cp` should be returned when simulating, it should be defined in the `@observed` block using `=`;
+│ if `cp` is an intermediate quantity that should not be returned when simulating, it should be defined using `:=`.
+└ @ Pumas /build/run/_work/PumasSystemImages/PumasSystemImages/julia_depot/packages/Pumas/GZeMg/src/dsl/model_macro.jl:2351
+ERROR: LoadError: SystemError: opening file "/mnt/data/code/learning/publication/paper1-uncertainty-propagation/rerun/output/parameter_sets.jls": No such file or directory
+Stacktrace:
+ [1] systemerror(p::String, errno::Int32; extrainfo::Nothing)
+   @ Base ./error.jl:176
+ [2] systemerror
+   @ ./error.jl:175 [inlined]
+ [3] open(fname::String; lock::Bool, read::Nothing, write::Nothing, create::Nothing, truncate::Nothing, append::Nothing)
+   @ Base ./iostream.jl:295
+ [4] open
+   @ ./iostream.jl:277 [inlined]
+ [5] open(f::typeof(deserialize), args::String; kwargs::@Kwargs{})
+   @ Base ./io.jl:408
+ [6] open
+   @ ./io.jl:407 [inlined]
+ [7] deserialize(filename::String)
+   @ Serialization /build/run/_work/_tool/julia/1.11.8/x64/share/julia/stdlib/v1.11/Serialization/src/Serialization.jl:841
+ [8] top-level scope
+   @ /mnt/data/code/learning/publication/paper1-uncertainty-propagation/rerun/02_grid.jl:14
+in expression starting at /mnt/data/code/learning/publication/paper1-uncertainty-propagation/rerun/02_grid.jl:14
+WARNING: using Makie.Categorical in module Main conflicts with an existing identifier.
+θ̂ = (tvcl = 5.0585682725394605, tvv = 51.36620030585912, tvka = 1.1651899382530528, tvbio = 0.9602665207562151, Ω = [0.13718070568440033 0.0 0.0; 0.0 0.05771824910947612 0.0; 0.0 0.0 0.13328883506643377], σ = 0.20057901393823366)
+VCOV done
+Bootstrap: 500 usable fits, 51.0 min
+SIR: 1000 resamples, 1.8 min
+┌ Warning: Variable `cp` is defined in the `@derived` block using `=` and hence `cp` is not used for model fitting but only returned when simulating:
+│ If `cp` is a random variable, it must be defined in the `@derived` block using `~`;
+│ if `cp` should be returned when simulating, it should be defined in the `@observed` block using `=`;
+│ if `cp` is an intermediate quantity that should not be returned when simulating, it should be defined using `:=`.
+└ @ Pumas /build/run/_work/PumasSystemImages/PumasSystemImages/julia_depot/packages/Pumas/GZeMg/src/dsl/model_macro.jl:2351
+[ Info: Checking the initial parameter values.
+[ Info: The initial negative log likelihood and its gradient are finite. Check passed.
+[ Info: Bootstrap inference finished.
+[ Info: Calculating: variance-covariance matrix.
+[ Info: Done.
+24×5 DataFrame
+ Row │ method     parameter  q025        q50         q975
+     │ String     String     Float64     Float64     Float64
+─────┼──────────────────────────────────────────────────────────
+   1 │ VCOV       tvcl        4.49734     5.0512      5.63365
+   2 │ VCOV       tvv        47.4624     51.1815     55.5905
+   3 │ VCOV       tvka        1.01244     1.161       1.33206
+   4 │ VCOV       tvbio       0.859673    0.958639    1.06548
+   5 │ VCOV       omega_cl    0.0962526   0.137836    0.199195
+   6 │ VCOV       omega_v     0.0398661   0.057533    0.0831836
+   7 │ VCOV       omega_ka    0.0739327   0.130933    0.254226
+   8 │ VCOV       sigma       0.196071    0.20063     0.204965
+   9 │ Bootstrap  tvcl        4.55817     5.06808     5.59952
+  10 │ Bootstrap  tvv        47.6814     51.4388     55.7066
+  11 │ Bootstrap  tvka        1.02486     1.16815     1.33452
+  12 │ Bootstrap  tvbio       0.85819     0.962339    1.06907
+  13 │ Bootstrap  omega_cl    0.0893956   0.134675    0.188837
+  14 │ Bootstrap  omega_v     0.0364736   0.0555614   0.078317
+  15 │ Bootstrap  omega_ka    0.0518574   0.127555    0.19896
+  16 │ Bootstrap  sigma       0.196137    0.200808    0.20475
+  17 │ SIR        tvcl        4.53748     5.0549      5.58277
+  18 │ SIR        tvv        47.6092     51.5906     55.6933
+  19 │ SIR        tvka        1.0269      1.162       1.29964
+  20 │ SIR        tvbio       0.866494    0.964192    1.06089
+  21 │ SIR        omega_cl    0.101707    0.142902    0.192949
+  22 │ SIR        omega_v     0.0407028   0.0602242   0.0830201
+  23 │ SIR        omega_ka    0.0780105   0.141096    0.216662
+  24 │ SIR        sigma       0.195998    0.200476    0.204614
+01 DONE
+WARNING: using Makie.Categorical in module Main conflicts with an existing identifier.
+Grid: 7 n × 5 T/R × 4 methods, 20 × 100 trials/cell, 2 threads
+Fixed      n=12 T/R=0.7  pass=0.15%  valid=2000/2000  cell 94.0 s  total 0.03 h
+VCOV       n=12 T/R=0.7  pass=0.15%  valid=2000/2000  cell 88.0 s  total 0.05 h
+Bootstrap  n=12 T/R=0.7  pass=0.1%  valid=2000/2000  cell 79.0 s  total 0.07 h
+SIR        n=12 T/R=0.7  pass=0.05%  valid=2000/2000  cell 80.0 s  total 0.09 h
+Fixed      n=12 T/R=0.9  pass=26.95%  valid=2000/2000  cell 79.0 s  total 0.12 h
+VCOV       n=12 T/R=0.9  pass=24.15%  valid=2000/2000  cell 79.0 s  total 0.14 h
+Bootstrap  n=12 T/R=0.9  pass=26.2%  valid=2000/2000  cell 78.0 s  total 0.16 h
+SIR        n=12 T/R=0.9  pass=23.9%  valid=2000/2000  cell 79.0 s  total 0.18 h
+Fixed      n=12 T/R=1.0  pass=38.85%  valid=2000/2000  cell 80.0 s  total 0.2 h
+VCOV       n=12 T/R=1.0  pass=36.5%  valid=2000/2000  cell 78.0 s  total 0.23 h
+Bootstrap  n=12 T/R=1.0  pass=41.95%  valid=2000/2000  cell 81.0 s  total 0.25 h
+SIR        n=12 T/R=1.0  pass=35.55%  valid=2000/2000  cell 81.0 s  total 0.27 h
+Fixed      n=12 T/R=1.1  pass=24.95%  valid=2000/2000  cell 80.0 s  total 0.29 h
+VCOV       n=12 T/R=1.1  pass=24.0%  valid=2000/2000  cell 79.0 s  total 0.32 h
+Bootstrap  n=12 T/R=1.1  pass=25.4%  valid=2000/2000  cell 79.0 s  total 0.34 h
+SIR        n=12 T/R=1.1  pass=22.15%  valid=2000/2000  cell 79.0 s  total 0.36 h
+Fixed      n=12 T/R=1.3  pass=1.25%  valid=2000/2000  cell 80.0 s  total 0.38 h
+VCOV       n=12 T/R=1.3  pass=1.4%  valid=2000/2000  cell 80.0 s  total 0.4 h
+Bootstrap  n=12 T/R=1.3  pass=1.0%  valid=2000/2000  cell 80.0 s  total 0.43 h
+SIR        n=12 T/R=1.3  pass=0.95%  valid=2000/2000  cell 80.0 s  total 0.45 h
+Fixed      n=24 T/R=0.7  pass=0.1%  valid=2000/2000  cell 152.0 s  total 0.49 h
+VCOV       n=24 T/R=0.7  pass=0.05%  valid=2000/2000  cell 153.0 s  total 0.53 h
+Bootstrap  n=24 T/R=0.7  pass=0.05%  valid=2000/2000  cell 152.0 s  total 0.58 h
+SIR        n=24 T/R=0.7  pass=0.05%  valid=2000/2000  cell 152.0 s  total 0.62 h
+Fixed      n=24 T/R=0.9  pass=60.7%  valid=2000/2000  cell 157.0 s  total 0.66 h
+VCOV       n=24 T/R=0.9  pass=59.65%  valid=2000/2000  cell 156.0 s  total 0.7 h
+Bootstrap  n=24 T/R=0.9  pass=61.25%  valid=2000/2000  cell 154.0 s  total 0.75 h
+SIR        n=24 T/R=0.9  pass=58.7%  valid=2000/2000  cell 154.0 s  total 0.79 h
+Fixed      n=24 T/R=1.0  pass=89.55%  valid=2000/2000  cell 156.0 s  total 0.83 h
+VCOV       n=24 T/R=1.0  pass=87.95%  valid=2000/2000  cell 155.0 s  total 0.88 h
+Bootstrap  n=24 T/R=1.0  pass=90.05%  valid=2000/2000  cell 156.0 s  total 0.92 h
+SIR        n=24 T/R=1.0  pass=87.8%  valid=2000/2000  cell 156.0 s  total 0.96 h
+Fixed      n=24 T/R=1.1  pass=63.05%  valid=2000/2000  cell 157.0 s  total 1.01 h
+VCOV       n=24 T/R=1.1  pass=64.15%  valid=2000/2000  cell 158.0 s  total 1.05 h
+Bootstrap  n=24 T/R=1.1  pass=63.1%  valid=2000/2000  cell 157.0 s  total 1.09 h
+SIR        n=24 T/R=1.1  pass=61.75%  valid=2000/2000  cell 157.0 s  total 1.14 h
+Fixed      n=24 T/R=1.3  pass=1.8%  valid=2000/2000  cell 159.0 s  total 1.18 h
+VCOV       n=24 T/R=1.3  pass=1.95%  valid=2000/2000  cell 159.0 s  total 1.23 h
+Bootstrap  n=24 T/R=1.3  pass=1.35%  valid=2000/2000  cell 158.0 s  total 1.27 h
+SIR        n=24 T/R=1.3  pass=1.6%  valid=2000/2000  cell 159.0 s  total 1.31 h
+Fixed      n=30 T/R=0.7  pass=0.05%  valid=2000/2000  cell 187.0 s  total 1.37 h
+VCOV       n=30 T/R=0.7  pass=0.0%  valid=2000/2000  cell 186.0 s  total 1.42 h
+Bootstrap  n=30 T/R=0.7  pass=0.1%  valid=2000/2000  cell 187.0 s  total 1.47 h
+SIR        n=30 T/R=0.7  pass=0.1%  valid=2000/2000  cell 188.0 s  total 1.52 h
+Fixed      n=30 T/R=0.9  pass=71.95%  valid=2000/2000  cell 189.0 s  total 1.57 h
+VCOV       n=30 T/R=0.9  pass=70.05%  valid=2000/2000  cell 190.0 s  total 1.63 h
+Bootstrap  n=30 T/R=0.9  pass=72.5%  valid=2000/2000  cell 190.0 s  total 1.68 h
+SIR        n=30 T/R=0.9  pass=70.6%  valid=2000/2000  cell 191.0 s  total 1.73 h
+Fixed      n=30 T/R=1.0  pass=96.2%  valid=2000/2000  cell 193.0 s  total 1.79 h
+VCOV       n=30 T/R=1.0  pass=94.8%  valid=2000/2000  cell 193.0 s  total 1.84 h
+Bootstrap  n=30 T/R=1.0  pass=96.6%  valid=2000/2000  cell 192.0 s  total 1.89 h
+SIR        n=30 T/R=1.0  pass=94.5%  valid=2000/2000  cell 193.0 s  total 1.95 h
+Fixed      n=30 T/R=1.1  pass=73.5%  valid=2000/2000  cell 193.0 s  total 2.0 h
+VCOV       n=30 T/R=1.1  pass=72.3%  valid=2000/2000  cell 196.0 s  total 2.06 h
+Bootstrap  n=30 T/R=1.1  pass=74.0%  valid=2000/2000  cell 194.0 s  total 2.11 h
+SIR        n=30 T/R=1.1  pass=70.4%  valid=2000/2000  cell 195.0 s  total 2.16 h
+Fixed      n=30 T/R=1.3  pass=1.25%  valid=2000/2000  cell 196.0 s  total 2.22 h
+VCOV       n=30 T/R=1.3  pass=1.6%  valid=2000/2000  cell 198.0 s  total 2.27 h
+Bootstrap  n=30 T/R=1.3  pass=1.2%  valid=2000/2000  cell 197.0 s  total 2.33 h
+SIR        n=30 T/R=1.3  pass=1.7%  valid=2000/2000  cell 198.0 s  total 2.38 h
+Fixed      n=40 T/R=0.7  pass=0.0%  valid=2000/2000  cell 253.0 s  total 2.45 h
+VCOV       n=40 T/R=0.7  pass=0.05%  valid=2000/2000  cell 255.0 s  total 2.52 h
+Bootstrap  n=40 T/R=0.7  pass=0.0%  valid=2000/2000  cell 256.0 s  total 2.6 h
+SIR        n=40 T/R=0.7  pass=0.0%  valid=2000/2000  cell 255.0 s  total 2.67 h
+Fixed      n=40 T/R=0.9  pass=85.2%  valid=2000/2000  cell 260.0 s  total 2.74 h
+VCOV       n=40 T/R=0.9  pass=84.7%  valid=2000/2000  cell 260.0 s  total 2.81 h
+Bootstrap  n=40 T/R=0.9  pass=83.6%  valid=2000/2000  cell 262.0 s  total 2.88 h
+SIR        n=40 T/R=0.9  pass=81.8%  valid=2000/2000  cell 262.0 s  total 2.96 h
+Fixed      n=40 T/R=1.0  pass=99.5%  valid=2000/2000  cell 263.0 s  total 3.03 h
+VCOV       n=40 T/R=1.0  pass=98.95%  valid=2000/2000  cell 266.0 s  total 3.1 h
+Bootstrap  n=40 T/R=1.0  pass=99.0%  valid=2000/2000  cell 264.0 s  total 3.18 h
+SIR        n=40 T/R=1.0  pass=99.3%  valid=2000/2000  cell 266.0 s  total 3.25 h
+Fixed      n=40 T/R=1.1  pass=86.6%  valid=2000/2000  cell 263.0 s  total 3.32 h
+VCOV       n=40 T/R=1.1  pass=84.95%  valid=2000/2000  cell 265.0 s  total 3.4 h
+Bootstrap  n=40 T/R=1.1  pass=85.5%  valid=2000/2000  cell 266.0 s  total 3.47 h
+SIR        n=40 T/R=1.1  pass=84.75%  valid=2000/2000  cell 266.0 s  total 3.54 h
+Fixed      n=40 T/R=1.3  pass=1.25%  valid=2000/2000  cell 269.0 s  total 3.62 h
+VCOV       n=40 T/R=1.3  pass=1.6%  valid=2000/2000  cell 268.0 s  total 3.69 h
+Bootstrap  n=40 T/R=1.3  pass=1.5%  valid=2000/2000  cell 269.0 s  total 3.77 h
+SIR        n=40 T/R=1.3  pass=1.85%  valid=2000/2000  cell 273.0 s  total 3.84 h
+Fixed      n=50 T/R=0.7  pass=0.05%  valid=2000/2000  cell 322.0 s  total 3.93 h
+VCOV       n=50 T/R=0.7  pass=0.05%  valid=2000/2000  cell 324.0 s  total 4.02 h
+Bootstrap  n=50 T/R=0.7  pass=0.0%  valid=2000/2000  cell 321.0 s  total 4.11 h
+SIR        n=50 T/R=0.7  pass=0.1%  valid=2000/2000  cell 323.0 s  total 4.2 h
+Fixed      n=50 T/R=0.9  pass=91.2%  valid=2000/2000  cell 328.0 s  total 4.29 h
+VCOV       n=50 T/R=0.9  pass=90.7%  valid=2000/2000  cell 330.0 s  total 4.39 h
+Bootstrap  n=50 T/R=0.9  pass=92.4%  valid=2000/2000  cell 329.0 s  total 4.48 h
+SIR        n=50 T/R=0.9  pass=90.0%  valid=2000/2000  cell 330.0 s  total 4.57 h
+Fixed      n=50 T/R=1.0  pass=99.9%  valid=2000/2000  cell 331.0 s  total 4.66 h
+VCOV       n=50 T/R=1.0  pass=99.6%  valid=2000/2000  cell 332.0 s  total 4.75 h
+Bootstrap  n=50 T/R=1.0  pass=99.85%  valid=2000/2000  cell 331.0 s  total 4.85 h
+SIR        n=50 T/R=1.0  pass=99.95%  valid=2000/2000  cell 334.0 s  total 4.94 h
+Fixed      n=50 T/R=1.1  pass=93.45%  valid=2000/2000  cell 334.0 s  total 5.03 h
+VCOV       n=50 T/R=1.1  pass=92.6%  valid=2000/2000  cell 416.0 s  total 5.15 h
+Bootstrap  n=50 T/R=1.1  pass=93.05%  valid=2000/2000  cell 338.0 s  total 5.24 h
+SIR        n=50 T/R=1.1  pass=92.3%  valid=2000/2000  cell 340.0 s  total 5.33 h
+Fixed      n=50 T/R=1.3  pass=1.2%  valid=2000/2000  cell 343.0 s  total 5.43 h
+VCOV       n=50 T/R=1.3  pass=1.45%  valid=2000/2000  cell 347.0 s  total 5.53 h
+Bootstrap  n=50 T/R=1.3  pass=2.15%  valid=2000/2000  cell 347.0 s  total 5.62 h
+SIR        n=50 T/R=1.3  pass=1.6%  valid=2000/2000  cell 348.0 s  total 5.72 h
+Fixed      n=60 T/R=0.7  pass=0.0%  valid=2000/2000  cell 399.0 s  total 5.83 h
+VCOV       n=60 T/R=0.7  pass=0.05%  valid=2000/2000  cell 400.0 s  total 5.94 h
+Bootstrap  n=60 T/R=0.7  pass=0.0%  valid=2000/2000  cell 400.0 s  total 6.05 h
+SIR        n=60 T/R=0.7  pass=0.0%  valid=2000/2000  cell 399.0 s  total 6.16 h
+Fixed      n=60 T/R=0.9  pass=95.3%  valid=2000/2000  cell 405.0 s  total 6.28 h
+VCOV       n=60 T/R=0.9  pass=95.0%  valid=2000/2000  cell 408.0 s  total 6.39 h
+Bootstrap  n=60 T/R=0.9  pass=94.75%  valid=2000/2000  cell 409.0 s  total 6.5 h
+SIR        n=60 T/R=0.9  pass=94.35%  valid=2000/2000  cell 410.0 s  total 6.62 h
+Fixed      n=60 T/R=1.0  pass=100.0%  valid=2000/2000  cell 411.0 s  total 6.73 h
+VCOV       n=60 T/R=1.0  pass=99.95%  valid=2000/2000  cell 415.0 s  total 6.85 h
+Bootstrap  n=60 T/R=1.0  pass=100.0%  valid=2000/2000  cell 412.0 s  total 6.96 h
+SIR        n=60 T/R=1.0  pass=99.9%  valid=2000/2000  cell 415.0 s  total 7.08 h
+Fixed      n=60 T/R=1.1  pass=96.7%  valid=2000/2000  cell 413.0 s  total 7.19 h
+VCOV       n=60 T/R=1.1  pass=95.6%  valid=2000/2000  cell 415.0 s  total 7.31 h
+Bootstrap  n=60 T/R=1.1  pass=96.75%  valid=2000/2000  cell 415.0 s  total 7.42 h
+SIR        n=60 T/R=1.1  pass=95.8%  valid=2000/2000  cell 416.0 s  total 7.54 h
+Fixed      n=60 T/R=1.3  pass=1.35%  valid=2000/2000  cell 420.0 s  total 7.65 h
+VCOV       n=60 T/R=1.3  pass=1.6%  valid=2000/2000  cell 422.0 s  total 7.77 h
+Bootstrap  n=60 T/R=1.3  pass=1.45%  valid=2000/2000  cell 422.0 s  total 7.89 h
+SIR        n=60 T/R=1.3  pass=1.7%  valid=2000/2000  cell 422.0 s  total 8.0 h
+Fixed      n=80 T/R=0.7  pass=0.0%  valid=2000/2000  cell 548.0 s  total 8.16 h
+VCOV       n=80 T/R=0.7  pass=0.0%  valid=2000/2000  cell 545.0 s  total 8.31 h
+Bootstrap  n=80 T/R=0.7  pass=0.0%  valid=2000/2000  cell 544.0 s  total 8.46 h
+SIR        n=80 T/R=0.7  pass=0.0%  valid=2000/2000  cell 548.0 s  total 8.61 h
+Fixed      n=80 T/R=0.9  pass=99.1%  valid=2000/2000  cell 556.0 s  total 8.77 h
+VCOV       n=80 T/R=0.9  pass=98.75%  valid=2000/2000  cell 557.0 s  total 8.92 h
+Bootstrap  n=80 T/R=0.9  pass=98.85%  valid=2000/2000  cell 556.0 s  total 9.08 h
+SIR        n=80 T/R=0.9  pass=98.25%  valid=2000/2000  cell 555.0 s  total 9.23 h
+Fixed      n=80 T/R=1.0  pass=100.0%  valid=2000/2000  cell 562.0 s  total 9.39 h
+VCOV       n=80 T/R=1.0  pass=100.0%  valid=2000/2000  cell 553.0 s  total 9.54 h
+Bootstrap  n=80 T/R=1.0  pass=100.0%  valid=2000/2000  cell 555.0 s  total 9.69 h
+SIR        n=80 T/R=1.0  pass=100.0%  valid=2000/2000  cell 554.0 s  total 9.85 h
+Fixed      n=80 T/R=1.1  pass=99.3%  valid=2000/2000  cell 555.0 s  total 10.0 h
+VCOV       n=80 T/R=1.1  pass=99.1%  valid=2000/2000  cell 556.0 s  total 10.16 h
+Bootstrap  n=80 T/R=1.1  pass=99.15%  valid=2000/2000  cell 558.0 s  total 10.31 h
+SIR        n=80 T/R=1.1  pass=98.65%  valid=2000/2000  cell 557.0 s  total 10.47 h
+Fixed      n=80 T/R=1.3  pass=1.3%  valid=2000/2000  cell 564.0 s  total 10.62 h
+VCOV       n=80 T/R=1.3  pass=1.5%  valid=2000/2000  cell 563.0 s  total 10.78 h
+Bootstrap  n=80 T/R=1.3  pass=1.35%  valid=2000/2000  cell 563.0 s  total 10.93 h
+SIR        n=80 T/R=1.3  pass=1.45%  valid=2000/2000  cell 564.0 s  total 11.09 h
+┌ Warning: Variable `cp` is defined in the `@derived` block using `=` and hence `cp` is not used for model fitting but only returned when simulating:
+│ If `cp` is a random variable, it must be defined in the `@derived` block using `~`;
+│ if `cp` should be returned when simulating, it should be defined in the `@observed` block using `=`;
+│ if `cp` is an intermediate quantity that should not be returned when simulating, it should be defined using `:=`.
+└ @ Pumas /build/run/_work/PumasSystemImages/PumasSystemImages/julia_depot/packages/Pumas/GZeMg/src/dsl/model_macro.jl:2351
+02 DONE
