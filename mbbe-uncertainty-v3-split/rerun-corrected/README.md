@@ -30,7 +30,7 @@ acceptance in the stored VCOV, Bootstrap and SIR results, rising with n.
 - False acceptance ≤ 0.2% at T/R 0.70 and 1.0–2.2% at T/R 1.30 for all four methods, with no trend in n.
 - Power at T/R 1.00 differs from Fixed by at most 3.4 points (n ≤ 40). n for 80% power:
   Fixed 21.7, VCOV 22.1, Bootstrap 21.5, SIR 22.2 per arm.
-- Changing the AUC endpoint from AUC0–∞ to AUC0–t alone moved n for 80% power from about 35 to 22.
+- Changing the AUC endpoint from AUC0–∞ to AUC0–t alone moved n for 80% power from about 33 to 22.
 - The additive error compresses observed ratios towards 1 for both endpoints (AUC0–t more than
   Cmax). At a true T/R of 1.30 the median AUC0–t ratio is 1.20, so false acceptance stays near 1%
   only because Cmax is co-primary (`output/gmr_check.txt`).

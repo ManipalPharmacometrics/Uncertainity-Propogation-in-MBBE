@@ -49,7 +49,7 @@ Universal job engine with three parameter resolution modes (priority order): con
 
 ## Important Patterns
 
-- **VCOV sampling is done on log-scale** then exponentiated back, ensuring all sampled parameters remain positive
+- **VCOV sampling is done on log-scale** then exponentiated back, ensuring all sampled parameters remain positive. `vcov()` from Pumas is on the natural scale, so `sample_from_vcov` converts it with the delta method (D⁻¹ V D⁻¹) first; before 2026-09-28 it did not, and the stored VCOV/Bootstrap/SIR grids are invalid (see `rerun-corrected/README.md`)
 - **Deterministic seeding**: batch seeds use `hash((method, tr_ratio, n_arm, batch_id)) % typemax(Int32)` for reproducibility and independence
 - **NCA column detection is dynamic** — tries multiple candidate names (`aucinf_obs`, `aucinf`, `auclast`, etc.) to stay software-agnostic
 - **BE pass requires both AUC and Cmax** to fall within 80–125% limits (AND logic)
